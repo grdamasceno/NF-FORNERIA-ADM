@@ -141,3 +141,11 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Dados reais/sensíveis (planilha de faturamento, cadastro de unidades) —
+# repositório é público, não commitar. Usados só localmente para gerar
+# src/data/franquias.json (ver TODO.md → "Inventário de dados fixos/fictícios").
+Arquivos/
+
+# Documento avulso não relacionado ao app
+ordem-de-compra-15657.pdf
