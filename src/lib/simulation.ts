@@ -9,11 +9,11 @@ export interface NfseEmissionResult {
   status: 'simulada' | 'falha'
 }
 
-// Quem está tomando o serviço — só o essencial que a Focus NFe vai precisar
-// (dados do tomador). Deliberadamente menor que `Invoice`: esta função é
-// chamada 1x por invoice_item candidato, inclusive antes de a fatura existir
-// de fato (fila de emissão — ver src/data/pendingEmissions.ts).
-export interface NfseEmissionTarget {
+// Quem está do outro lado da operação — só o essencial que a Focus NFe (ou o
+// disparo de WhatsApp/e-mail) vai precisar. Deliberadamente menor que
+// `Invoice`: usado também antes de a fatura existir de fato (fila de
+// emissão — ver src/data/pendingEmissions.ts).
+export interface SimulationTarget {
   unitId: string
   unitName: string
 }
@@ -23,7 +23,7 @@ export interface NfseEmissionTarget {
 // (seção 4 do MD v2). O item específico (valor, service_code) fica a cargo
 // de quem chama.
 // TODO: INTEGRAÇÃO FUTURA — trocar corpo por chamada à API da Focus NFe.
-export async function simulateNfseEmission(_target: NfseEmissionTarget): Promise<NfseEmissionResult> {
+export async function simulateNfseEmission(_target: SimulationTarget): Promise<NfseEmissionResult> {
   await delay(300)
   const sequential = Math.floor(100000 + Math.random() * 900000)
   return { nfseNumber: `NFS-e ${sequential}`, status: 'simulada' }
@@ -48,13 +48,13 @@ export async function simulateBoletoGeneration(invoice: Invoice, dueInDays = 10)
 }
 
 // TODO: INTEGRAÇÃO FUTURA — disparar via n8n/Chatwoot (Baileys).
-export async function simulateWhatsappSend(_invoice: Invoice): Promise<{ sent: boolean }> {
+export async function simulateWhatsappSend(_target: SimulationTarget): Promise<{ sent: boolean }> {
   await delay(150)
   return { sent: true }
 }
 
 // TODO: INTEGRAÇÃO FUTURA — integrar com provedor de e-mail.
-export async function simulateEmailSend(_invoice: Invoice): Promise<{ sent: boolean }> {
+export async function simulateEmailSend(_target: SimulationTarget): Promise<{ sent: boolean }> {
   await delay(150)
   return { sent: true }
 }

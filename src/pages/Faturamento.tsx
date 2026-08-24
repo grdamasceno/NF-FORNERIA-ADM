@@ -4,36 +4,74 @@ import { UploadIcon } from '@/components/icons'
 import { SimBadge } from '@/components/SimBadge'
 import { Tag, statusTag } from '@/components/dashboard/statusTags'
 import { formatBRL } from '@/lib/format'
-import { simulateNfseEmission } from '@/lib/simulation'
+import { simulateEmailSend, simulateNfseEmission, simulateWhatsappSend } from '@/lib/simulation'
+import { useSettings, type EligibleServiceType, type EmitterCnpj } from '@/context/SettingsContext'
 import { mockInvoices } from '@/data/mockInvoices'
 import { importHistory, lastImportWarnings } from '@/data/mockFaturamento'
 import { pendingEmissions, totalOf, type PendingEmissionRow } from '@/data/pendingEmissions'
 
 type EmitMode = 'consolidado' | 'separado'
-type ServiceKey = 'consolidado' | 'call_center' | 'royalties' | 'marketing'
-type RowStatus = 'pendente' | 'emitindo' | 'emitida'
+type ServiceKey = 'consolidado' | EligibleServiceType
+type NfseRowStatus = 'pendente' | 'emitindo' | 'emitida'
+type PaymentStatus = 'a_pagar' | 'pago'
+type SendStatus = 'nao_enviado' | 'enviando' | 'enviado'
 
 interface EmittedItem {
   serviceType: ServiceKey
   label: string
   value: number
   nfseNumber: string
+  emitter: EmitterCnpj | null
 }
 
 interface RowState {
   mode: EmitMode
-  status: RowStatus
+  status: NfseRowStatus
   items: EmittedItem[]
+  showNfse: boolean
+  boletoFileName: string | null
+  payment: PaymentStatus
+  send: SendStatus
+}
+
+const SERVICE_LABEL: Record<EligibleServiceType, string> = {
+  call_center: 'Call Center',
+  royalties: 'Royalties',
+  marketing: 'Marketing',
 }
 
 const initialRows = (): Record<string, RowState> =>
-  Object.fromEntries(pendingEmissions.map((r) => [r.id, { mode: 'consolidado', status: 'pendente', items: [] } satisfies RowState]))
+  Object.fromEntries(
+    pendingEmissions.map((r) => [
+      r.id,
+      {
+        mode: 'consolidado',
+        status: 'pendente',
+        items: [],
+        showNfse: false,
+        boletoFileName: null,
+        payment: 'a_pagar',
+        send: 'nao_enviado',
+      } satisfies RowState,
+    ]),
+  )
+
+function servicesOf(row: PendingEmissionRow): Array<{ serviceType: EligibleServiceType; label: string; value: number }> {
+  return [
+    { serviceType: 'call_center', label: SERVICE_LABEL.call_center, value: row.callCenterValue },
+    { serviceType: 'royalties', label: SERVICE_LABEL.royalties, value: row.royaltiesValue },
+    { serviceType: 'marketing', label: SERVICE_LABEL.marketing, value: row.marketingValue },
+  ]
+}
 
 // Histórico de importação/fila são fictícios (import fake), mas a fila de
-// emissão abaixo usa valores reais de Junho/2026 (ver src/data/pendingEmissions.ts).
-// Ver TODO.md → "Inventário de dados fixos/fictícios".
+// emissão abaixo usa valores fictícios "com cara de real" (ver
+// src/data/pendingEmissions.ts). Boleto é só upload manual — este MVP não
+// gera boleto/PIX de verdade (nem simulado). Ver TODO.md → "Inventário de
+// dados fixos/fictícios".
 export function Faturamento() {
   const [rows, setRows] = useState<Record<string, RowState>>(initialRows)
+  const { serviceEligibility, sendChannel, emitterFor } = useSettings()
 
   const statusCounts = (Object.keys(statusTag) as Array<keyof typeof statusTag>).map((status) => ({
     status,
@@ -42,6 +80,21 @@ export function Faturamento() {
 
   const pendingCount = pendingEmissions.filter((r) => rows[r.id].status === 'pendente').length
 
+  // Só entra na fila de emissão o serviço habilitado, com valor > 0 e que
+  // tenha um CNPJ emissor configurado em Configurações — sem CNPJ não dá
+  // pra saber quem emite a nota, então fica de fora (igual um serviço
+  // desabilitado).
+  function eligibleServices(row: PendingEmissionRow) {
+    return servicesOf(row).filter((s) => serviceEligibility[s.serviceType] && s.value > 0 && emitterFor(row.marca, s.serviceType))
+  }
+
+  // "1 nota" só é possível quando todos os serviços elegíveis compartilham o
+  // mesmo CNPJ emissor — uma NFS-e não pode sair de dois CNPJs diferentes.
+  function canConsolidate(row: PendingEmissionRow) {
+    const ids = new Set(eligibleServices(row).map((s) => emitterFor(row.marca, s.serviceType)?.id))
+    return ids.size <= 1
+  }
+
   function setMode(id: string, mode: EmitMode) {
     setRows((prev) => (prev[id].status === 'pendente' ? { ...prev, [id]: { ...prev[id], mode } } : prev))
   }
@@ -49,21 +102,22 @@ export function Faturamento() {
   async function emitRow(row: PendingEmissionRow) {
     if (rows[row.id].status !== 'pendente') return
     const mode = rows[row.id].mode
+    const eligible = eligibleServices(row)
+    if (eligible.length === 0) return
+    if (mode === 'consolidado' && !canConsolidate(row)) return
+
     setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], status: 'emitindo' } }))
 
     let items: EmittedItem[]
     if (mode === 'consolidado') {
       const result = await simulateNfseEmission({ unitId: row.id, unitName: row.unitName })
-      items = [{ serviceType: 'consolidado', label: 'Consolidada', value: totalOf(row), nfseNumber: result.nfseNumber }]
+      const value = eligible.reduce((sum, s) => sum + s.value, 0)
+      const label = eligible.length === 3 ? 'Consolidada' : `Consolidada (${eligible.map((s) => s.label).join(' + ')})`
+      const emitter = emitterFor(row.marca, eligible[0].serviceType)
+      items = [{ serviceType: 'consolidado', label, value, nfseNumber: result.nfseNumber, emitter }]
     } else {
-      const allServices: Array<{ serviceType: ServiceKey; label: string; value: number }> = [
-        { serviceType: 'call_center', label: 'Call Center', value: row.callCenterValue },
-        { serviceType: 'royalties', label: 'Royalties', value: row.royaltiesValue },
-        { serviceType: 'marketing', label: 'Marketing', value: row.marketingValue },
-      ]
-      const candidates = allServices.filter((c) => c.value > 0)
-      const results = await Promise.all(candidates.map(() => simulateNfseEmission({ unitId: row.id, unitName: row.unitName })))
-      items = candidates.map((c, i) => ({ ...c, nfseNumber: results[i].nfseNumber }))
+      const results = await Promise.all(eligible.map(() => simulateNfseEmission({ unitId: row.id, unitName: row.unitName })))
+      items = eligible.map((s, i) => ({ ...s, nfseNumber: results[i].nfseNumber, emitter: emitterFor(row.marca, s.serviceType) }))
     }
 
     setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], status: 'emitida', items } }))
@@ -74,9 +128,30 @@ export function Faturamento() {
     await Promise.all(pending.map((row) => emitRow(row)))
   }
 
+  function handleBoletoChange(id: string, file: File | null) {
+    if (!file) return
+    setRows((prev) => ({ ...prev, [id]: { ...prev[id], boletoFileName: file.name } }))
+  }
+
+  function toggleShowNfse(id: string) {
+    setRows((prev) => ({ ...prev, [id]: { ...prev[id], showNfse: !prev[id].showNfse } }))
+  }
+
+  function togglePayment(id: string) {
+    setRows((prev) => ({ ...prev, [id]: { ...prev[id], payment: prev[id].payment === 'pago' ? 'a_pagar' : 'pago' } }))
+  }
+
+  async function sendRow(row: PendingEmissionRow) {
+    if (rows[row.id].send !== 'nao_enviado') return
+    setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], send: 'enviando' } }))
+    const dispatch = sendChannel === 'whatsapp' ? simulateWhatsappSend : simulateEmailSend
+    await dispatch({ unitId: row.id, unitName: row.unitName })
+    setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], send: 'enviado' } }))
+  }
+
   return (
     <>
-      <PageHeader title="Faturamento" subtitle="Importar planilha e emitir lote — fluxo simulado">
+      <PageHeader title="Faturamento" subtitle="Importar planilha, emitir nota, cobrar e enviar — fluxo simulado">
         <div className="flex items-center gap-2 rounded-[11px] border border-line bg-card px-[13px] py-[9px] text-[12.5px] font-semibold text-navy">
           Competência: Junho / 2026
         </div>
@@ -109,93 +184,169 @@ export function Faturamento() {
           <div>
             <h3 className="text-[14.5px] font-bold text-navy">Emitir nota fiscal por unidade</h3>
             <p className="mt-0.5 text-[11.5px] text-faint">
-              Valores reais de Junho/2026 · escolha 1 nota consolidada ou até 3 (por serviço) antes de emitir
+              Emite só os serviços habilitados em Configurações · anexe o boleto, marque como pago e envie a cobrança
             </p>
           </div>
           <SimBadge label="NFS-e SIMULADA" />
         </div>
-        <table className="w-full border-collapse">
-          <thead>
-            <tr>
-              {['Unidade', 'Call Center', 'Royalties', 'Marketing', 'Total', 'Modo de emissão', 'Nota(s) fiscal(is)', ''].map((h, i) => (
-                <th
-                  key={h}
-                  className={`border-y border-line bg-[#fafbfc] px-5 py-[11px] text-left text-[10.5px] font-bold uppercase tracking-[.06em] text-faint ${
-                    i >= 1 && i <= 4 ? 'text-right' : ''
-                  }`}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {pendingEmissions.map((row) => {
-              const state = rows[row.id]
-              return (
-                <tr key={row.id} className="border-b border-line last:border-none hover:bg-[#fafbfc]">
-                  <td className="px-5 py-[13px] text-[13px] font-semibold text-navy">{row.unitName}</td>
-                  <td className="px-5 py-[13px] text-right text-[12px] text-muted">{formatBRL(row.callCenterValue)}</td>
-                  <td className="px-5 py-[13px] text-right text-[12px] text-muted">{formatBRL(row.royaltiesValue)}</td>
-                  <td className="px-5 py-[13px] text-right text-[12px] text-muted">{formatBRL(row.marketingValue)}</td>
-                  <td className="px-5 py-[13px] text-right">
-                    <span className="font-display font-bold text-navy">{formatBRL(totalOf(row))}</span>
-                  </td>
-                  <td className="px-5 py-[13px]">
-                    <div className="inline-flex overflow-hidden rounded-[9px] border border-line">
-                      <button
-                        disabled={state.status !== 'pendente'}
-                        onClick={() => setMode(row.id, 'consolidado')}
-                        className={`px-[10px] py-[6px] text-[11px] font-bold disabled:cursor-not-allowed ${
-                          state.mode === 'consolidado' ? 'bg-orange text-white' : 'bg-white text-navy'
-                        }`}
-                      >
-                        1 nota
-                      </button>
-                      <button
-                        disabled={state.status !== 'pendente'}
-                        onClick={() => setMode(row.id, 'separado')}
-                        className={`border-l border-line px-[10px] py-[6px] text-[11px] font-bold disabled:cursor-not-allowed ${
-                          state.mode === 'separado' ? 'bg-orange text-white' : 'bg-white text-navy'
-                        }`}
-                      >
-                        até 3 notas
-                      </button>
-                    </div>
-                  </td>
-                  <td className="px-5 py-[13px]">
-                    {state.status === 'pendente' && <span className="text-[11.5px] text-faint">—</span>}
-                    {state.status === 'emitindo' && (
-                      <span className="text-[11.5px] font-semibold text-amber">Emitindo…</span>
-                    )}
-                    {state.status === 'emitida' && (
-                      <div className="flex flex-col gap-1">
-                        {state.items.map((it) => (
-                          <span key={it.serviceType} className="font-display text-[11.5px] font-bold text-navy">
-                            {state.items.length > 1 && <span className="font-sans font-medium text-faint">{it.label}: </span>}
-                            {it.nfseNumber}
-                          </span>
-                        ))}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1280px] border-collapse">
+            <thead>
+              <tr>
+                {['Unidade', 'Call Center', 'Royalties', 'Marketing', 'Total', 'Modo de emissão', 'Ações'].map((h, i) => (
+                  <th
+                    key={h}
+                    className={`border-y border-line bg-[#fafbfc] px-5 py-[11px] text-left text-[10.5px] font-bold uppercase tracking-[.06em] text-faint ${
+                      i >= 1 && i <= 4 ? 'text-right' : ''
+                    } ${i === 6 ? 'min-w-[280px]' : ''}`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pendingEmissions.map((row) => {
+                const state = rows[row.id]
+                const eligible = eligibleServices(row)
+                return (
+                  <tr key={row.id} className="border-b border-line last:border-none hover:bg-[#fafbfc]">
+                    <td className="px-5 py-[13px] text-[13px] font-semibold text-navy">{row.unitName}</td>
+                    <td className={`px-5 py-[13px] text-right text-[12px] ${serviceEligibility.call_center ? 'text-muted' : 'text-faint line-through'}`}>
+                      {formatBRL(row.callCenterValue)}
+                    </td>
+                    <td className={`px-5 py-[13px] text-right text-[12px] ${serviceEligibility.royalties ? 'text-muted' : 'text-faint line-through'}`}>
+                      {formatBRL(row.royaltiesValue)}
+                    </td>
+                    <td className={`px-5 py-[13px] text-right text-[12px] ${serviceEligibility.marketing ? 'text-muted' : 'text-faint line-through'}`}>
+                      {formatBRL(row.marketingValue)}
+                    </td>
+                    <td className="px-5 py-[13px] text-right">
+                      <span className="font-display font-bold text-navy">{formatBRL(totalOf(row))}</span>
+                    </td>
+                    <td className="px-5 py-[13px]">
+                      <div className="inline-flex overflow-hidden rounded-[9px] border border-line">
+                        <button
+                          disabled={state.status !== 'pendente' || !canConsolidate(row)}
+                          onClick={() => setMode(row.id, 'consolidado')}
+                          title={!canConsolidate(row) ? 'Serviços elegíveis usam CNPJs emissores diferentes — só dá pra emitir separado' : undefined}
+                          className={`px-[10px] py-[6px] text-[11px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
+                            state.mode === 'consolidado' ? 'bg-orange text-white' : 'bg-white text-navy'
+                          }`}
+                        >
+                          1 nota
+                        </button>
+                        <button
+                          disabled={state.status !== 'pendente'}
+                          onClick={() => setMode(row.id, 'separado')}
+                          className={`border-l border-line px-[10px] py-[6px] text-[11px] font-bold disabled:cursor-not-allowed ${
+                            state.mode === 'separado' ? 'bg-orange text-white' : 'bg-white text-navy'
+                          }`}
+                        >
+                          até 3 notas
+                        </button>
                       </div>
-                    )}
-                  </td>
-                  <td className="px-5 py-[13px] text-right">
-                    {state.status === 'pendente' && (
-                      <button
-                        onClick={() => emitRow(row)}
-                        className="rounded-[8px] bg-orange px-[12px] py-[7px] text-[11px] font-bold text-white"
-                      >
-                        Emitir
-                      </button>
-                    )}
-                    {state.status === 'emitindo' && <span className="text-[11px] font-semibold text-faint">…</span>}
-                    {state.status === 'emitida' && <Tag tone="g" label="Emitida" />}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                    </td>
+                    <td className="px-5 py-[13px]">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex flex-nowrap items-center gap-[6px]">
+                          <label
+                            className="cursor-pointer whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
+                            title={state.boletoFileName ?? 'Anexar boleto (upload manual — este app não gera boleto)'}
+                          >
+                            {state.boletoFileName ? '📎 Boleto' : 'Boleto'}
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              className="hidden"
+                              onChange={(e) => handleBoletoChange(row.id, e.target.files?.[0] ?? null)}
+                            />
+                          </label>
+
+                          <button
+                            onClick={() => togglePayment(row.id)}
+                            className={`whitespace-nowrap rounded-[7px] px-[8px] py-[5px] text-[10.5px] font-bold ${
+                              state.payment === 'pago' ? 'bg-green-soft text-green' : 'bg-amber-soft text-amber'
+                            }`}
+                          >
+                            {state.payment === 'pago' ? 'Pago ✓' : 'A pagar'}
+                          </button>
+
+                          {state.status === 'pendente' && (
+                            <button
+                              disabled={eligible.length === 0 || (state.mode === 'consolidado' && !canConsolidate(row))}
+                              onClick={() => emitRow(row)}
+                              title={
+                                eligible.length === 0
+                                  ? 'Nenhum serviço elegível (verifique habilitação e CNPJ emissor em Configurações)'
+                                  : state.mode === 'consolidado' && !canConsolidate(row)
+                                    ? 'Troque para "até 3 notas" — CNPJs emissores diferentes'
+                                    : undefined
+                              }
+                              className="whitespace-nowrap rounded-[7px] bg-orange px-[8px] py-[5px] text-[10.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Emitir
+                            </button>
+                          )}
+                          {state.status === 'emitindo' && (
+                            <span className="whitespace-nowrap rounded-[7px] bg-[#eef1f4] px-[8px] py-[5px] text-[10.5px] font-semibold text-faint">
+                              Emitindo…
+                            </span>
+                          )}
+                          {state.status === 'emitida' && (
+                            <button
+                              onClick={() => toggleShowNfse(row.id)}
+                              className="whitespace-nowrap rounded-[7px] bg-green-soft px-[8px] py-[5px] text-[10.5px] font-bold text-green"
+                            >
+                              Ver nota fiscal
+                            </button>
+                          )}
+
+                          {state.send === 'nao_enviado' && (
+                            <button
+                              onClick={() => sendRow(row)}
+                              className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
+                            >
+                              Enviar
+                            </button>
+                          )}
+                          {state.send === 'enviando' && (
+                            <span className="whitespace-nowrap rounded-[7px] bg-[#eef1f4] px-[8px] py-[5px] text-[10.5px] font-semibold text-faint">
+                              Enviando…
+                            </span>
+                          )}
+                          {state.send === 'enviado' && (
+                            <span className="whitespace-nowrap rounded-[7px] bg-blue-soft px-[8px] py-[5px] text-[10.5px] font-bold text-blue">
+                              Enviado ✓
+                            </span>
+                          )}
+                        </div>
+
+                        {state.status === 'emitida' && state.showNfse && (
+                          <div className="flex flex-col gap-1 pl-0.5">
+                            {state.items.map((it) => (
+                              <div key={it.serviceType}>
+                                <span className="font-display text-[10.5px] font-bold text-navy">
+                                  {state.items.length > 1 && <span className="font-sans font-medium text-faint">{it.label}: </span>}
+                                  {it.nfseNumber}
+                                </span>
+                                {it.emitter && (
+                                  <div className="text-[10px] text-faint">
+                                    {it.emitter.razaoSocial} · {it.emitter.cnpj}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="mb-[18px] animate-rise rounded-card bg-card p-5 shadow-card" style={{ animationDelay: '.1s' }}>

@@ -36,28 +36,6 @@ export const FaturamentoIcon = (p: IconProps) => (
   </svg>
 )
 
-export const NotasIcon = (p: IconProps) => (
-  <svg {...base} {...p}>
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-    <path d="M14 2v6h6" />
-    <path d="M8 13h8M8 17h5" />
-  </svg>
-)
-
-export const BoletoIcon = (p: IconProps) => (
-  <svg {...base} {...p}>
-    <rect x="2" y="6" width="20" height="12" rx="2" />
-    <path d="M6 6v12M10 6v12M14 6v12M18 6v12" />
-  </svg>
-)
-
-export const EnviosIcon = (p: IconProps) => (
-  <svg {...base} {...p}>
-    <path d="M22 2 11 13" />
-    <path d="M22 2 15 22l-4-9-9-4z" />
-  </svg>
-)
-
 export const RelatoriosIcon = (p: IconProps) => (
   <svg {...base} {...p}>
     <path d="M3 3v18h18" />

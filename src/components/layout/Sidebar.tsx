@@ -1,14 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import {
-  BoletoIcon,
-  ConfigIcon,
-  EnviosIcon,
-  FaturamentoIcon,
-  FranquiasIcon,
-  NotasIcon,
-  PainelIcon,
-  RelatoriosIcon,
-} from '@/components/icons'
+import { ConfigIcon, FaturamentoIcon, FranquiasIcon, PainelIcon, RelatoriosIcon } from '@/components/icons'
 import { activeFranchiseCount } from '@/data/units'
 import logoOnChannel from '@/assets/logo-onchannel.jpeg'
 
@@ -50,15 +41,6 @@ export function Sidebar() {
         </NavLink>
         <NavLink to="/faturamento" className={navLinkClass}>
           <FaturamentoIcon className={iconClass} /> Faturamento
-        </NavLink>
-        <NavLink to="/notas-fiscais" className={navLinkClass}>
-          <NotasIcon className={iconClass} /> Notas Fiscais
-        </NavLink>
-        <NavLink to="/boletos-pix" className={navLinkClass}>
-          <BoletoIcon className={iconClass} /> Boletos &amp; PIX
-        </NavLink>
-        <NavLink to="/envios" className={navLinkClass}>
-          <EnviosIcon className={iconClass} /> Envios
         </NavLink>
 
         <div className="mb-[7px] mt-[14px] px-[10px] text-[10.5px] font-bold tracking-[.13em] text-faint">
