@@ -41,7 +41,7 @@ Ler isto **antes** de começar a fase de conectar o Supabase — é o mapa de tu
 
 | Onde | O quê |
 |---|---|
-| `src/lib/simulation.ts` | `simulateNfseEmission`, `simulateWhatsappSend`, `simulateEmailSend` — já marcadas com `// TODO: INTEGRAÇÃO FUTURA`. `simulateBoletoGeneration` existe mas não é mais usada (boleto virou upload manual — ver nota no topo do arquivo). Continuam simuladas até a Focus NFe / n8n-Chatwoot entrarem de fato. |
+| `src/lib/simulation.ts` | `simulateNfseEmission`, `simulateWhatsappSend`, `simulateEmailSend` — já marcadas com `// TODO: INTEGRAÇÃO FUTURA`. `simulateBoletoGeneration` existe mas não é mais usada (boleto virou upload manual — ver nota no topo do arquivo). A integração real da Focus NFe já existe em paralelo (`supabase/functions/emit-nfse`, seção 8 de "Próximos passos"), mas o botão "Emitir" ainda chama a versão simulada — ainda falta dado fiscal do tomador pra poder trocar. `simulateWhatsappSend`/`simulateEmailSend` continuam simuladas até o n8n/Chatwoot entrar de fato. |
 | **Faturamento → "Emitir nota fiscal por unidade"** | Fila de emissão (`src/data/pendingEmissions.ts`, 8 unidades), com 4 ações lado a lado por linha: **Boleto** (upload manual), **A pagar/Pago** (toggle com undo), **Emitir** e **Enviar**. Um serviço só entra na emissão se estiver habilitado em Configurações **e** tiver um CNPJ emissor mapeado pra marca da unidade — sem CNPJ, fica de fora (igual desabilitado). "Emitir"/"Emitir lote" chamam `simulateNfseEmission` de verdade (com delay simulado); em modo "1 nota" a nota sai no CNPJ comum aos serviços elegíveis — se os elegíveis usam CNPJs diferentes (ex: Royalties e Call Center no exemplo dado), o botão "1 nota" fica **desabilitado**, forçando "até 3 notas" (uma NFS-e não pode sair de dois CNPJs). Depois de emitida, o botão vira "Ver nota fiscal" e revela o(s) número(s) da NFS-e + razão social/CNPJ de quem emitiu, ao clicar. "Enviar" chama `simulateWhatsappSend`/`simulateEmailSend` conforme o canal escolhido em Configurações. Tudo em estado local (`useState` em `Faturamento.tsx`); recarregar a página reseta tudo. Nada é persistido ainda. |
 
 ## Concluído — estrutura inicial do projeto
@@ -116,6 +116,19 @@ Ler isto **antes** de começar a fase de conectar o Supabase — é o mapa de tu
 ### 7. Multi-tenant / whitelabel
 - [ ] Seletor de rede (Forneria / The Duck) trocando o tenant ativo no Sidebar/CobrandBar — hoje só a tela de Franquias distingue as duas marcas (via filtro), o resto do app continua fixo em "Forneria Original"
 - [ ] Logo/cor do cliente dinâmicos a partir de `tenant.logo_url` / `tenant.primary_color` (hoje a caixa do logo do cliente na CobrandBar é um placeholder sem imagem)
+
+### 8. Integração real com a Focus NFe (seção 8 do MD)
+Já existem 3 CNPJs cadastrados na Focus NFe com token de homologação e produção — este item é sobre ligar o `simulateNfseEmission` fictício à API de verdade.
+
+- [x] Pesquisada a API real da Focus NFe (2026-08-27): `POST /v2/nfse?ref=...` (Basic Auth, token como usuário, senha em branco), assíncrona — devolve `processando_autorizacao` e só fica `autorizado`/`erro_autorizacao` depois, consultável em `GET /v2/nfse/{ref}`. Bases: `https://homologacao.focusnfe.com.br` / `https://api.focusnfe.com.br`.
+- [x] Migration `supabase/migrations/0003_emitter_credentials.sql` pronta — cria `emitter_credentials` (token por emissor×ambiente, **sem grant nenhum pra `anon`/`authenticated`**, só a `service_role` lê) e colunas fiscais (`emitters.inscricao_municipal`/`codigo_municipio`, `emitter_mapping.item_lista_servico`/`iss_retido`)
+- [x] Edge Function `supabase/functions/emit-nfse/index.ts` pronta — monta o payload real, chama a Focus NFe com o token lido via `service_role`, faz um polling curto e devolve o resultado (ou `processando` se a Focus NFe demorar). Ver `supabase/functions/emit-nfse/README.md` pro contrato e passo a passo.
+- [ ] Rodar `0003_emitter_credentials.sql` no self-hosted
+- [ ] Inserir os tokens de homologação/produção dos 3 CNPJs em `emitter_credentials` (só por SQL direto — nunca pela API)
+- [ ] Preencher `inscricao_municipal`/`codigo_municipio` dos 3 emissores e `item_lista_servico`/`iss_retido` de cada combinação marca×serviço (confirmar códigos LC 116/2003 com o contador)
+- [ ] **Bloqueio real:** dado fiscal do TOMADOR (a unidade franqueada) não existe em lugar nenhum do app — nem `franquias.json` nem `pendingEmissions.ts` têm CNPJ/endereço fiscal completo das unidades. Sem isso a Edge Function recusa a emissão (validação, não fabrica dado fiscal falso). Precisa decidir de onde esse cadastro vem (planilha? cadastro manual? `unidades` do Supabase cloud, que também não tem isso hoje?)
+- [ ] Deploy da Edge Function no self-hosted (depende de como o `edge-runtime` está montado no Coolify — ver README da função)
+- [ ] **Ainda não conectado ao frontend**: o botão "Emitir" em Faturamento continua chamando `simulateNfseEmission` (fictício). Só trocar pela chamada real (`fetch` pro endpoint da Edge Function) depois do tomador ter dado fiscal — emitir NFS-e de verdade (mesmo em homologação) tem efeito colateral real na conta da Focus NFe, não é algo pra ligar sem essa base pronta
 
 ## Critérios de aceite do MVP (seção 10 do MD)
 
