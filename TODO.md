@@ -76,7 +76,9 @@ Ler isto **antes** de começar a fase de conectar o Supabase — é o mapa de tu
 - [ ] Storage bucket para guardar a planilha original importada
 - [ ] Trocar `src/data/units.ts` (JSON estático) por query à tabela `unidades` — essa tabela mora no projeto cloud "site forneria", não no self-hosted; decidir se o app lê de dois Supabase diferentes ou se `unidades` é replicada/migrada para `nf_forneria`
 - [ ] **Ganho rápido antes do Supabase:** trocar os valores fictícios de `src/data/mockInvoices.ts` pelos valores reais de Call Center/Royalties/Marketing de `Arquivos/Banco Junho 2026 Emissao de boletos.xlsx` (já sabemos parsear as duas abas — ver seção 3 do MD, `src/lib/spreadsheetParser.ts` e o exemplo em `src/data/pendingEmissions.ts`)
-- [ ] **Gap no schema v2 do MD:** `invoice_items` não tem coluna pra registrar qual CNPJ emissor gerou a nota (`src/context/SettingsContext.tsx` já modela isso no frontend — cadastro de CNPJs + mapeamento marca×serviço). Precisa de uma tabela `tenant_emitters` (razão social, CNPJ) + `emitter_mapping` (tenant/marca × service_type → emitter_id) + FK em `invoice_items` pra saber quem emitiu cada nota
+- [x] Migration `supabase/migrations/0002_emitters.sql` pronta — cria `nf_forneria.emitters` (CNPJ, não pertence a um tenant só — o mesmo CNPJ pode emitir por mais de uma marca, como o Call Center do exemplo real) e `nf_forneria.emitter_mapping` (tenant/marca × service_type → emitter, 1 por combinação), + coluna `emitter_id` em `invoice_items` (snapshot de quem emitiu cada nota). RLS ligado sem policy, GRANTs iguais à 0001.
+- [ ] Rodar `0002_emitters.sql` no self-hosted (mesmo processo da 0001 — Supabase Studio SQL Editor)
+- [ ] Trocar `src/context/SettingsContext.tsx` (`emitters`/`emitterMapping` em memória) por essas tabelas quando o Faturamento/Configurações ligarem no Supabase de verdade
 
 ### 2. Fluxo de importação de planilha (seção 5.2 do MD)
 - [ ] Tela de upload de `.xlsx` (usa `src/lib/spreadsheetParser.ts`)
