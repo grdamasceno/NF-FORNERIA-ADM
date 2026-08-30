@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Brand, ServiceType } from '@/types'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
 
 export type EligibleServiceType = Exclude<ServiceType, 'consolidado'>
 export type SendChannel = 'whatsapp' | 'email'
@@ -50,14 +51,16 @@ const DEFAULT_MAPPING: Record<string, string | null> = {
 }
 
 // `serviceEligibility` é a única fatia deste contexto que já persiste de
-// verdade (tabela `nf_forneria.service_eligibility`, RLS aberto pra anon —
-// decisão explícita do usuário em 2026-08-30, ver migration 0005). O resto
-// (canal de envio, CNPJs emissores e mapeamento marca×serviço) continua em
-// memória — reseta ao recarregar. Ver TODO.md → "Inventário de dados
-// fixos/fictícios".
+// verdade (tabela `nf_forneria.service_eligibility`, agora com RLS real por
+// organização — migration 0007, exige usuário logado). O resto (canal de
+// envio, CNPJs emissores e mapeamento marca×serviço) continua em memória —
+// reseta ao recarregar. Ver TODO.md → "Inventário de dados fixos/fictícios".
 const SettingsContext = createContext<SettingsContextValue | null>(null)
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
+  const { profile } = useAuth()
+  const organizationId = profile?.organizationId ?? null
+
   const [serviceEligibility, setServiceEligibility] = useState<Record<EligibleServiceType, boolean>>({
     call_center: true,
     royalties: true,
@@ -68,10 +71,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [emitterMapping, setEmitterMappingState] = useState<Record<string, string | null>>(DEFAULT_MAPPING)
 
   useEffect(() => {
+    if (!organizationId) return
     let cancelled = false
     supabase
       .from('service_eligibility')
       .select('service_type, enabled')
+      .eq('organization_id', organizationId)
       .then(({ data, error }) => {
         if (cancelled || error || !data) return
         setServiceEligibility((prev) => {
@@ -85,7 +90,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [organizationId])
 
   const value = useMemo<SettingsContextValue>(
     () => ({
@@ -96,13 +101,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       toggleServiceEligibility: (service) => {
         setServiceEligibility((prev) => {
           const enabled = !prev[service]
-          supabase
-            .from('service_eligibility')
-            .update({ enabled, updated_at: new Date().toISOString() })
-            .eq('service_type', service)
-            .then(({ error }) => {
-              if (error) console.error('Falha ao salvar elegibilidade de serviço:', error.message)
-            })
+          if (organizationId) {
+            supabase
+              .from('service_eligibility')
+              .update({ enabled, updated_at: new Date().toISOString() })
+              .eq('organization_id', organizationId)
+              .eq('service_type', service)
+              .then(({ error }) => {
+                if (error) console.error('Falha ao salvar elegibilidade de serviço:', error.message)
+              })
+          }
           return { ...prev, [service]: enabled }
         })
       },

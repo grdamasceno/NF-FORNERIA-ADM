@@ -2,8 +2,10 @@ import { supabase } from '@/lib/supabase'
 import type { Brand, LiveUnit } from '@/types'
 
 // Leitura/escrita de verdade em `nf_forneria.units` — usado só pela tela de
-// Franquias (ver migration 0005: RLS aberto pra anon nessa tabela até o
-// Auth existir).
+// Franquias. RLS (migration 0007) já filtra por organização sozinho: um
+// `select` sem filtro nenhum aqui só volta as unidades da organização do
+// usuário logado (ou todas, se ele for superadmin) — não precisa repetir
+// esse filtro no código.
 
 const TENANT_NAME_TO_BRAND: Record<string, Brand> = {
   'Forneria Original': 'Forneria',
