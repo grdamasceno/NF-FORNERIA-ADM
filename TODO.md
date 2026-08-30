@@ -90,18 +90,10 @@ Introduz o nível "empresa" acima de `tenants` (marca): **`organizations`** — 
 - [x] Migration `supabase/migrations/0007_organizations_and_auth.sql` pronta — cria `organizations`, `profiles`, funções auxiliares (`current_role()`, `current_organization()`, `is_superadmin()`, todas `security definer` pra evitar recursão de RLS), e troca as policies "abertas pra `anon`" de `units`/`service_eligibility` (migration 0005) por RLS de verdade restrita a `authenticated` + organização. `tenants`, `emitters` e `service_eligibility` ganham `organization_id` (`service_eligibility` virou chave composta `(organization_id, service_type)`)
 - [x] `src/context/AuthContext.tsx` (sessão + perfil via `supabase.auth`) + `src/pages/Login.tsx` (formulário e-mail/senha) + `App.tsx` decide entre spinner/login/app conforme sessão — **testado localmente, renderiza certo, zero erro de console**
 - [x] `SettingsContext.tsx` (elegibilidade de serviço) e Sidebar (mostra e-mail/papel do usuário logado + botão "Sair") atualizados pra usar `organization_id` do perfil
-- [ ] ⚠️ **Rodar `0007_organizations_and_auth.sql` no self-hosted** — sem ela, ninguém consegue logar (tabela `profiles` não existe ainda)
-- [ ] ⚠️ **Criar os 2 usuários reais no Supabase Studio → Authentication → Add user** (e-mail + senha) — um vai virar `admin` de Grupo Original, outro `superadmin`. Depois de criar cada um, rodar (trocando o e-mail e o papel):
-  ```sql
-  insert into nf_forneria.profiles (id, role, organization_id)
-  select id, 'admin', (select id from nf_forneria.organizations where name = 'Grupo Original')
-  from auth.users where email = 'email-do-admin@...';
-
-  insert into nf_forneria.profiles (id, role, organization_id)
-  select id, 'superadmin', null
-  from auth.users where email = 'email-do-superadmin@...';
-  ```
-- [ ] ⚠️ **Não fazer push/deploy deste commit antes dos dois passos acima** — sem `profiles` preenchida, absolutamente ninguém consegue entrar no app em produção (a tela de login carrega, mas o login falha pra todo mundo)
+- [x] `0007_organizations_and_auth.sql` rodada no self-hosted (2026-08-30)
+- [x] Os 2 usuários criados de verdade — mas não pelo Studio (a tela de Authentication → Add user não estava funcionando nesse self-hosted); foram criados via **Admin API do GoTrue** (`POST /auth/v1/admin/users` com a service role key, rodado localmente pelo usuário, script nunca viu a chave) — anotar isso caso a criação de usuário pelo Studio continue quebrada no futuro
+- [x] `profiles` preenchida e conferida na Table Editor: uma linha `admin`/organization_id = Grupo Original, outra `superadmin`/organization_id nulo
+- [x] **Push feito (2026-08-30) só depois de confirmar os dois passos acima** — login em produção deve estar funcional agora
 - [ ] Depois de validado: tela (só pra `superadmin`) de gerenciar organizações — criar novas, ver quantas marcas/unidades cada uma tem. Hoje só existe a tabela pronta, sem UI nenhuma pra isso
 - [ ] Sidebar/CobrandBar: trocar "Forneria Original" fixo por dado real da organização/tenant do usuário logado (mesma pendência já anotada no inventário, agora fica mais fácil com `profile.organizationId` disponível)
 
