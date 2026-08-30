@@ -22,7 +22,7 @@ export function Login() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg px-4">
       <div className="w-full max-w-[380px] rounded-card bg-card p-8 shadow-card">
-        <div className="mb-6 flex items-center gap-[11px]">
+        <div className="mb-6 flex flex-col items-center gap-[11px] text-center">
           <div className="h-[38px] w-[38px] flex-shrink-0 overflow-hidden rounded-[11px] bg-white shadow-[0_6px_14px_rgba(233,78,27,.22)]">
             <img src={logoOnChannel} alt="OnChannel" className="h-full w-full object-cover" />
           </div>
@@ -32,8 +32,7 @@ export function Login() {
           </div>
         </div>
 
-        <h1 className="mb-1 text-[18px] font-bold text-navy">Entrar</h1>
-        <p className="mb-5 text-[12.5px] text-muted">Acesse com o e-mail e senha cadastrados pelo administrador.</p>
+        <h1 className="mb-5 text-[18px] font-bold text-navy">Entrar</h1>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <label className="flex flex-col gap-1">
