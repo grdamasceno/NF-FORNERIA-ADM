@@ -49,6 +49,33 @@ export interface FranchiseUnit {
   ativo: boolean
 }
 
+// Unidade vinda de verdade do Supabase (`nf_forneria.units`, migrations
+// 0005/0006) — usada só na tela de Franquias, que é a única ligada ao banco
+// por enquanto (Sidebar/Configurações continuam no `FranchiseUnit` estático
+// acima). Tem os campos fiscais que `FranchiseUnit` não tem, necessários
+// pro "tomador" da NFS-e (seção 8 do MD / integração Focus NFe).
+export interface LiveUnit {
+  id: string
+  tenantId: string
+  marca: Brand
+  name: string
+  cnpj: string | null
+  active: boolean
+  cidade: string | null
+  estado: string | null
+  uf: string | null
+  endereco: string | null
+  logradouro: string | null
+  numero: string | null
+  bairro: string | null
+  cep: string | null
+  codigoMunicipio: string | null
+  telefone: string | null
+  email: string | null
+  horario: string | null
+  imagem: string | null
+}
+
 export interface BillingPeriod {
   id: string
   tenantId: string

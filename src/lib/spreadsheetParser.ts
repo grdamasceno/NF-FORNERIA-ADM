@@ -44,6 +44,23 @@ export function parseSpreadsheet(file: ArrayBuffer): ParsedSheet[] {
   return workbook.SheetNames.map((sheetName) => parseSheet(sheetName, workbook.Sheets[sheetName]))
 }
 
+// A planilha real tem uma linha de título antes do cabeçalho de verdade
+// ("Vendas Junho 26" / "Mês JUNHO 26") — por isso não dá pra assumir que a
+// linha 0 já é o cabeçalho. Procura, nas primeiras linhas, a que tem pelo
+// menos um dos nomes de coluna conhecidos.
+function findHeaderRowIndex(raw: unknown[][]): number {
+  const knownAliases = [...HEADER_ALIASES.callCenter, ...HEADER_ALIASES.royalties, ...HEADER_ALIASES.marketing, ...HEADER_ALIASES.unitName]
+  for (let i = 0; i < Math.min(raw.length, 5); i++) {
+    // `Array.from` em vez de `.map` de propósito: linhas de planilha vêm
+    // como sparse arrays (buracos nas células vazias), e `.findIndex` visita
+    // buracos diferente de `.map`/`.some` — `Array.from` densifica antes de
+    // qualquer comparação, evitando erro ao chamar `.includes` num `undefined`.
+    const headers = Array.from(raw[i], normalizeHeader)
+    if (headers.some((h) => knownAliases.some((a) => h.includes(a)))) return i
+  }
+  return 0
+}
+
 function parseSheet(sheetName: string, sheet: XLSX.WorkSheet): ParsedSheet {
   const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false })
   const warnings: ImportWarning[] = []
@@ -52,12 +69,19 @@ function parseSheet(sheetName: string, sheet: XLSX.WorkSheet): ParsedSheet {
     return { tenantName: sheetName, rows: [], warnings }
   }
 
-  const [headerRow, ...dataRows] = raw
-  const headers = headerRow.map(normalizeHeader)
+  const headerRowIndex = findHeaderRowIndex(raw)
+  const headerRow = raw[headerRowIndex]
+  const dataRows = raw.slice(headerRowIndex + 1)
+  const headers = Array.from(headerRow, normalizeHeader) // ver comentário em findHeaderRowIndex
 
   const findCol = (aliases: readonly string[]) => headers.findIndex((h) => aliases.some((a) => h.includes(a)))
 
-  const colUnitName = 0 // primeira coluna, conforme seção 3 do MD
+  // Nem toda aba rotula a coluna do nome da unidade (a planilha "Forneria"
+  // deixa essa coluna sem cabeçalho) — quando não acha por nome, cai pra
+  // coluna 0 (seção 3 do MD). Quando acha (ex: "Nome da loja" na aba "The
+  // Duck", que não é a coluna 0), usa a que encontrou.
+  const foundUnitNameCol = findCol(HEADER_ALIASES.unitName)
+  const colUnitName = foundUnitNameCol === -1 ? 0 : foundUnitNameCol
   const colCallCenter = findCol(HEADER_ALIASES.callCenter)
   const colRoyalties = findCol(HEADER_ALIASES.royalties)
   const colMarketing = findCol(HEADER_ALIASES.marketing)
@@ -65,7 +89,7 @@ function parseSheet(sheetName: string, sheet: XLSX.WorkSheet): ParsedSheet {
   const rows: ParsedSpreadsheetRow[] = []
 
   dataRows.forEach((row, idx) => {
-    const rowIndex = idx + 2 // +1 header, +1 humano (1-based)
+    const rowIndex = headerRowIndex + idx + 2 // +1 pro cabeçalho, +1 pra virar 1-based
     const rawUnitName = String(row[colUnitName] ?? '').trim()
 
     const isEmptyRow = row.every((c) => c === undefined || c === null || String(c).trim() === '')

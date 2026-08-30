@@ -6,9 +6,12 @@ import { Tag, statusTag } from '@/components/dashboard/statusTags'
 import { formatBRL } from '@/lib/format'
 import { simulateEmailSend, simulateNfseEmission, simulateWhatsappSend } from '@/lib/simulation'
 import { useSettings, type EligibleServiceType, type EmitterCnpj } from '@/context/SettingsContext'
+import { parseSpreadsheet, type ParsedSheet } from '@/lib/spreadsheetParser'
+import { ImportPreviewModal } from '@/components/faturamento/ImportPreviewModal'
 import { mockInvoices } from '@/data/mockInvoices'
-import { importHistory, lastImportWarnings } from '@/data/mockFaturamento'
-import { pendingEmissions, totalOf, type PendingEmissionRow } from '@/data/pendingEmissions'
+import { importHistory as initialImportHistory, lastImportWarnings, type ImportHistoryEntry } from '@/data/mockFaturamento'
+import { pendingEmissions as defaultPendingEmissions, totalOf, type PendingEmissionRow } from '@/data/pendingEmissions'
+import type { Brand } from '@/types'
 
 type EmitMode = 'consolidado' | 'separado'
 type ServiceKey = 'consolidado' | EligibleServiceType
@@ -40,9 +43,9 @@ const SERVICE_LABEL: Record<EligibleServiceType, string> = {
   marketing: 'Marketing',
 }
 
-const initialRows = (): Record<string, RowState> =>
+const initialRows = (source: PendingEmissionRow[]): Record<string, RowState> =>
   Object.fromEntries(
-    pendingEmissions.map((r) => [
+    source.map((r) => [
       r.id,
       {
         mode: 'consolidado',
@@ -55,6 +58,38 @@ const initialRows = (): Record<string, RowState> =>
       } satisfies RowState,
     ]),
   )
+
+function slugify(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
+// Converte o resultado do parser (por aba/marca) na fila de emissão. Unidade
+// "sem cobrança no mês" fica de fora da fila (seção 3 do MD) — ela já
+// apareceu no preview antes da confirmação, é só não virar fatura.
+function toPendingRows(sheets: ParsedSheet[]): PendingEmissionRow[] {
+  return sheets.flatMap((sheet) => {
+    const marca: Brand = sheet.tenantName.trim().toLowerCase() === 'the duck' ? 'The Duck' : 'Forneria'
+    return sheet.rows
+      .filter((r) => !r.hasNoCharge)
+      .map((r) => {
+        const cleanName = r.unitName.replace(/^The Duck Pizzaria\s*-\s*/i, '').trim()
+        const unitName = marca === 'Forneria' ? `Forneria ${cleanName}` : `The Duck ${cleanName}`
+        return {
+          id: `${slugify(marca)}-${slugify(cleanName)}`,
+          unitName,
+          marca,
+          callCenterValue: r.callCenterValue,
+          royaltiesValue: r.royaltiesValue,
+          marketingValue: r.marketingValue,
+        } satisfies PendingEmissionRow
+      })
+  })
+}
 
 function servicesOf(row: PendingEmissionRow): Array<{ serviceType: EligibleServiceType; label: string; value: number }> {
   return [
@@ -70,8 +105,50 @@ function servicesOf(row: PendingEmissionRow): Array<{ serviceType: EligibleServi
 // gera boleto/PIX de verdade (nem simulado). Ver TODO.md → "Inventário de
 // dados fixos/fictícios".
 export function Faturamento() {
-  const [rows, setRows] = useState<Record<string, RowState>>(initialRows)
+  const [pendingEmissions, setPendingEmissions] = useState<PendingEmissionRow[]>(defaultPendingEmissions)
+  const [rows, setRows] = useState<Record<string, RowState>>(() => initialRows(defaultPendingEmissions))
+  const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(initialImportHistory)
+  const [preview, setPreview] = useState<{ fileName: string; sheets: ParsedSheet[] } | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
   const { serviceEligibility, sendChannel, emitterFor } = useSettings()
+
+  async function handleFileSelected(file: File) {
+    setImportError(null)
+    try {
+      const buffer = await file.arrayBuffer()
+      const sheets = parseSpreadsheet(buffer)
+      if (sheets.every((s) => s.rows.length === 0)) {
+        setImportError('Nenhuma unidade reconhecida nessa planilha — confira se o formato bate com o esperado.')
+        return
+      }
+      setPreview({ fileName: file.name, sheets })
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : 'Falha ao ler a planilha.')
+    }
+  }
+
+  function confirmImport() {
+    if (!preview) return
+    const newRows = toPendingRows(preview.sheets)
+    setPendingEmissions(newRows)
+    setRows(initialRows(newRows))
+    const totalRows = preview.sheets.reduce((sum, s) => sum + s.rows.length, 0)
+    const totalWarnings = preview.sheets.reduce((sum, s) => sum + s.warnings.length, 0)
+    setImportHistory((prev) => [
+      {
+        id: `import-${Date.now()}`,
+        competencia: 'Junho / 2026',
+        arquivo: preview.fileName,
+        importadoEm: new Date().toLocaleString('pt-BR'),
+        importadoPor: 'Você',
+        unidadesReconhecidas: totalRows,
+        alertas: totalWarnings,
+        status: 'confirmada',
+      },
+      ...prev,
+    ])
+    setPreview(null)
+  }
 
   const statusCounts = (Object.keys(statusTag) as Array<keyof typeof statusTag>).map((status) => ({
     status,
@@ -155,9 +232,19 @@ export function Faturamento() {
         <div className="flex items-center gap-2 rounded-[11px] border border-line bg-card px-[13px] py-[9px] text-[12.5px] font-semibold text-navy">
           Competência: Junho / 2026
         </div>
-        <button className="inline-flex items-center gap-2 rounded-[11px] border border-line bg-card px-[15px] py-[10px] text-[12.5px] font-bold text-navy">
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-[11px] border border-line bg-card px-[15px] py-[10px] text-[12.5px] font-bold text-navy">
           <UploadIcon className="h-4 w-4" /> Importar planilha
-        </button>
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) handleFileSelected(file)
+            }}
+          />
+        </label>
         <button
           onClick={emitLote}
           disabled={pendingCount === 0}
@@ -166,6 +253,14 @@ export function Faturamento() {
           Emitir lote {pendingCount > 0 && `(${pendingCount})`}
         </button>
       </PageHeader>
+
+      {importError && (
+        <div className="mb-[18px] rounded-[11px] bg-red-soft p-3 text-[12.5px] font-semibold text-red">⚠ {importError}</div>
+      )}
+
+      {preview && (
+        <ImportPreviewModal fileName={preview.fileName} sheets={preview.sheets} onCancel={() => setPreview(null)} onConfirm={confirmImport} />
+      )}
 
       <section className="mb-[18px] grid grid-cols-6 gap-3 max-[1080px]:grid-cols-3 max-[560px]:grid-cols-2">
         {statusCounts.map(({ status, count }) => (

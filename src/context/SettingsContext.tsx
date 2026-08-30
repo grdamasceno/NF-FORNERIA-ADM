@@ -1,5 +1,6 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Brand, ServiceType } from '@/types'
+import { supabase } from '@/lib/supabase'
 
 export type EligibleServiceType = Exclude<ServiceType, 'consolidado'>
 export type SendChannel = 'whatsapp' | 'email'
@@ -48,13 +49,12 @@ const DEFAULT_MAPPING: Record<string, string | null> = {
   [emitterKey('The Duck', 'marketing')]: null,
 }
 
-// Configurações em memória (não persistidas — reseta ao recarregar a
-// página). Ver TODO.md → "Inventário de dados fixos/fictícios". Controla:
-// - quais serviços (Call Center/Royalties/Marketing) geram NFS-e ao emitir
-//   (tela Faturamento → "Emitir nota fiscal por unidade");
-// - por qual canal o botão "Enviar" dessa mesma tela dispara;
-// - qual CNPJ emite a nota de cada serviço, por marca (cadastro de
-//   CNPJs + mapeamento marca×serviço → CNPJ).
+// `serviceEligibility` é a única fatia deste contexto que já persiste de
+// verdade (tabela `nf_forneria.service_eligibility`, RLS aberto pra anon —
+// decisão explícita do usuário em 2026-08-30, ver migration 0005). O resto
+// (canal de envio, CNPJs emissores e mapeamento marca×serviço) continua em
+// memória — reseta ao recarregar. Ver TODO.md → "Inventário de dados
+// fixos/fictícios".
 const SettingsContext = createContext<SettingsContextValue | null>(null)
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -67,13 +67,45 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [emitters, setEmitters] = useState<EmitterCnpj[]>(DEFAULT_EMITTERS)
   const [emitterMapping, setEmitterMappingState] = useState<Record<string, string | null>>(DEFAULT_MAPPING)
 
+  useEffect(() => {
+    let cancelled = false
+    supabase
+      .from('service_eligibility')
+      .select('service_type, enabled')
+      .then(({ data, error }) => {
+        if (cancelled || error || !data) return
+        setServiceEligibility((prev) => {
+          const next = { ...prev }
+          for (const row of data as Array<{ service_type: EligibleServiceType; enabled: boolean }>) {
+            next[row.service_type] = row.enabled
+          }
+          return next
+        })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const value = useMemo<SettingsContextValue>(
     () => ({
       serviceEligibility,
       sendChannel,
       emitters,
       emitterMapping,
-      toggleServiceEligibility: (service) => setServiceEligibility((prev) => ({ ...prev, [service]: !prev[service] })),
+      toggleServiceEligibility: (service) => {
+        setServiceEligibility((prev) => {
+          const enabled = !prev[service]
+          supabase
+            .from('service_eligibility')
+            .update({ enabled, updated_at: new Date().toISOString() })
+            .eq('service_type', service)
+            .then(({ error }) => {
+              if (error) console.error('Falha ao salvar elegibilidade de serviço:', error.message)
+            })
+          return { ...prev, [service]: enabled }
+        })
+      },
       setSendChannel,
       addEmitter: (razaoSocial, cnpj) =>
         setEmitters((prev) => [...prev, { id: crypto.randomUUID(), razaoSocial: razaoSocial.trim(), cnpj: cnpj.trim() }]),
