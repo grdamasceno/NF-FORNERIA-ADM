@@ -49,7 +49,6 @@ const SettingsContext = createContext<SettingsContextValue | null>(null)
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth()
-  const organizationId = profile?.organizationId ?? null
 
   const [serviceEligibility, setServiceEligibility] = useState<Record<EligibleServiceType, boolean>>({
     call_center: true,
@@ -60,6 +59,29 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [emitters, setEmitters] = useState<EmitterCnpj[]>([])
   const [emitterMapping, setEmitterMappingState] = useState<Record<string, EmitterMappingEntry>>({})
   const [tenantIdByBrand, setTenantIdByBrand] = useState<Partial<Record<Brand, string>>>({})
+  // `superadmin` não tem organização fixa (enxerga todas, via RLS). Hoje só
+  // existe uma organização de verdade ("Grupo Original"), então usamos a
+  // primeira encontrada como padrão pra ele conseguir configurar algo — até
+  // existir a tela de trocar/gerenciar organizações (ver TODO.md).
+  const [fallbackOrganizationId, setFallbackOrganizationId] = useState<string | null>(null)
+  const organizationId = profile?.organizationId ?? fallbackOrganizationId
+
+  useEffect(() => {
+    if (profile?.organizationId || profile?.role !== 'superadmin') return
+    let cancelled = false
+    supabase
+      .from('organizations')
+      .select('id')
+      .order('created_at')
+      .limit(1)
+      .then(({ data, error }) => {
+        if (cancelled || error || !data?.[0]) return
+        setFallbackOrganizationId(data[0].id)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.organizationId, profile?.role])
 
   useEffect(() => {
     if (!organizationId) return
