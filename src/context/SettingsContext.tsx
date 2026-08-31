@@ -2,28 +2,29 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { Brand, ServiceType } from '@/types'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import {
+  addEmitter as addEmitterRemote,
+  removeEmitter as removeEmitterRemote,
+  fetchEmitters,
+  fetchEmitterMapping,
+  upsertEmitterMapping,
+  emitterKey,
+  type LiveEmitter,
+  type EmitterMappingEntry,
+} from '@/lib/liveEmitters'
 
 export type EligibleServiceType = Exclude<ServiceType, 'consolidado'>
 export type SendChannel = 'whatsapp' | 'email'
 
-export interface EmitterCnpj {
-  id: string
-  razaoSocial: string
-  cnpj: string
-}
-
-// Chave do mapeamento marca+serviço -> emissor. Um serviço pode ter CNPJs
-// diferentes por marca (ex: Royalties) ou o mesmo CNPJ pras duas (ex: Call
-// Center, quando é uma operação compartilhada entre as marcas).
-export function emitterKey(marca: Brand, service: EligibleServiceType): string {
-  return `${marca}:${service}`
-}
+export type EmitterCnpj = LiveEmitter
+export type { EmitterMappingEntry }
+export { emitterKey }
 
 export interface AppSettings {
   serviceEligibility: Record<EligibleServiceType, boolean>
   sendChannel: SendChannel
   emitters: EmitterCnpj[]
-  emitterMapping: Record<string, string | null>
+  emitterMapping: Record<string, EmitterMappingEntry>
 }
 
 interface SettingsContextValue extends AppSettings {
@@ -32,29 +33,18 @@ interface SettingsContextValue extends AppSettings {
   addEmitter: (razaoSocial: string, cnpj: string) => void
   removeEmitter: (id: string) => void
   setEmitterMapping: (marca: Brand, service: EligibleServiceType, emitterId: string | null) => void
+  setEmitterItemListaServico: (marca: Brand, service: EligibleServiceType, value: string) => void
+  setEmitterIssRetido: (marca: Brand, service: EligibleServiceType, issRetido: boolean) => void
   emitterFor: (marca: Brand, service: EligibleServiceType) => EmitterCnpj | null
 }
 
-const DEFAULT_EMITTERS: EmitterCnpj[] = [
-  { id: 'em-forneria-franquias', razaoSocial: 'Forneria Original Franquias LTDA', cnpj: '34.104.005/0001-86' },
-  { id: 'em-theduck-franquias', razaoSocial: 'The Duck Franquias LTDA', cnpj: '62.588.733/0001-46' },
-  { id: 'em-forneria-callcenter', razaoSocial: 'Forneria Original Callcenter LTDA', cnpj: '34.104.037/0001-81' },
-]
+const EMPTY_MAPPING_ENTRY: EmitterMappingEntry = { emitterId: null, itemListaServico: null, issRetido: false }
 
-const DEFAULT_MAPPING: Record<string, string | null> = {
-  [emitterKey('Forneria', 'royalties')]: 'em-forneria-franquias',
-  [emitterKey('The Duck', 'royalties')]: 'em-theduck-franquias',
-  [emitterKey('Forneria', 'call_center')]: 'em-forneria-callcenter',
-  [emitterKey('The Duck', 'call_center')]: 'em-forneria-callcenter',
-  [emitterKey('Forneria', 'marketing')]: null,
-  [emitterKey('The Duck', 'marketing')]: null,
-}
-
-// `serviceEligibility` é a única fatia deste contexto que já persiste de
-// verdade (tabela `nf_forneria.service_eligibility`, agora com RLS real por
-// organização — migration 0007, exige usuário logado). O resto (canal de
-// envio, CNPJs emissores e mapeamento marca×serviço) continua em memória —
-// reseta ao recarregar. Ver TODO.md → "Inventário de dados fixos/fictícios".
+// `serviceEligibility`, `emitters` e `emitterMapping` (CNPJ emissor, item da
+// LC 116/2003 e retenção de ISS por marca×serviço) persistem de verdade em
+// `nf_forneria.emitters`/`emitter_mapping`, com RLS por organização
+// (migration 0007) — igual `lib/liveUnits.ts`. Só `sendChannel` continua em
+// memória (ver TODO.md → "Inventário de dados fixos/fictícios").
 const SettingsContext = createContext<SettingsContextValue | null>(null)
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -67,12 +57,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     marketing: true,
   })
   const [sendChannel, setSendChannel] = useState<SendChannel>('whatsapp')
-  const [emitters, setEmitters] = useState<EmitterCnpj[]>(DEFAULT_EMITTERS)
-  const [emitterMapping, setEmitterMappingState] = useState<Record<string, string | null>>(DEFAULT_MAPPING)
+  const [emitters, setEmitters] = useState<EmitterCnpj[]>([])
+  const [emitterMapping, setEmitterMappingState] = useState<Record<string, EmitterMappingEntry>>({})
+  const [tenantIdByBrand, setTenantIdByBrand] = useState<Partial<Record<Brand, string>>>({})
 
   useEffect(() => {
     if (!organizationId) return
     let cancelled = false
+
     supabase
       .from('service_eligibility')
       .select('service_type, enabled')
@@ -87,6 +79,21 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           return next
         })
       })
+
+    fetchEmitters()
+      .then((rows) => {
+        if (!cancelled) setEmitters(rows)
+      })
+      .catch((err) => console.error('Falha ao carregar CNPJs emissores:', err.message))
+
+    fetchEmitterMapping()
+      .then(({ mapping, tenantIdByBrand }) => {
+        if (cancelled) return
+        setEmitterMappingState(mapping)
+        setTenantIdByBrand(tenantIdByBrand)
+      })
+      .catch((err) => console.error('Falha ao carregar mapeamento de emissores:', err.message))
+
     return () => {
       cancelled = true
     }
@@ -115,19 +122,65 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         })
       },
       setSendChannel,
-      addEmitter: (razaoSocial, cnpj) =>
-        setEmitters((prev) => [...prev, { id: crypto.randomUUID(), razaoSocial: razaoSocial.trim(), cnpj: cnpj.trim() }]),
+      addEmitter: (razaoSocial, cnpj) => {
+        if (!razaoSocial.trim() || !cnpj.trim()) return
+        if (!organizationId) {
+          console.error('Falha ao cadastrar CNPJ emissor: usuário sem organização (superadmin ainda não escolheu uma).')
+          return
+        }
+        addEmitterRemote(razaoSocial.trim(), cnpj.trim(), organizationId)
+          .then((created) =>
+            setEmitters((prev) => [...prev, created].sort((a, b) => a.razaoSocial.localeCompare(b.razaoSocial))),
+          )
+          .catch((err) => console.error('Falha ao cadastrar CNPJ emissor:', err.message))
+      },
       removeEmitter: (id) => {
         setEmitters((prev) => prev.filter((e) => e.id !== id))
         setEmitterMappingState((prev) =>
-          Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v === id ? null : v])),
+          Object.fromEntries(
+            Object.entries(prev).map(([k, v]) => [k, v.emitterId === id ? { ...v, emitterId: null } : v]),
+          ),
         )
+        removeEmitterRemote(id).catch((err) => console.error('Falha ao remover CNPJ emissor:', err.message))
       },
-      setEmitterMapping: (marca, service, emitterId) =>
-        setEmitterMappingState((prev) => ({ ...prev, [emitterKey(marca, service)]: emitterId })),
-      emitterFor: (marca, service) => emitters.find((e) => e.id === emitterMapping[emitterKey(marca, service)]) ?? null,
+      setEmitterMapping: (marca, service, emitterId) => {
+        const key = emitterKey(marca, service)
+        setEmitterMappingState((prev) => ({ ...prev, [key]: { ...(prev[key] ?? EMPTY_MAPPING_ENTRY), emitterId } }))
+        const tenantId = tenantIdByBrand[marca]
+        if (tenantId) {
+          upsertEmitterMapping({ tenantId, service, emitterId }).catch((err) =>
+            console.error('Falha ao salvar emissor do serviço:', err.message),
+          )
+        }
+      },
+      setEmitterItemListaServico: (marca, service, valueText) => {
+        const key = emitterKey(marca, service)
+        const itemListaServico = valueText.trim() || null
+        setEmitterMappingState((prev) => ({
+          ...prev,
+          [key]: { ...(prev[key] ?? EMPTY_MAPPING_ENTRY), itemListaServico },
+        }))
+        const tenantId = tenantIdByBrand[marca]
+        if (tenantId) {
+          upsertEmitterMapping({ tenantId, service, itemListaServico }).catch((err) =>
+            console.error('Falha ao salvar item da lista de serviço:', err.message),
+          )
+        }
+      },
+      setEmitterIssRetido: (marca, service, issRetido) => {
+        const key = emitterKey(marca, service)
+        setEmitterMappingState((prev) => ({ ...prev, [key]: { ...(prev[key] ?? EMPTY_MAPPING_ENTRY), issRetido } }))
+        const tenantId = tenantIdByBrand[marca]
+        if (tenantId) {
+          upsertEmitterMapping({ tenantId, service, issRetido }).catch((err) =>
+            console.error('Falha ao salvar retenção de ISS:', err.message),
+          )
+        }
+      },
+      emitterFor: (marca, service) =>
+        emitters.find((e) => e.id === emitterMapping[emitterKey(marca, service)]?.emitterId) ?? null,
     }),
-    [serviceEligibility, sendChannel, emitters, emitterMapping],
+    [serviceEligibility, sendChannel, emitters, emitterMapping, organizationId, tenantIdByBrand],
   )
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>

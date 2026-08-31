@@ -11,8 +11,11 @@ const SERVICE_LABEL: Record<EligibleServiceType, string> = {
 }
 
 // As quatro primeiras seções são funcionais de verdade (afetam a tela
-// Faturamento, via SettingsContext) mas não são persistidas — resetam ao
-// recarregar a página. As demais são só exibição, ver
+// Faturamento, via SettingsContext). "Emissão de NFS-e por serviço", "CNPJs
+// emissores" e "Emissão por marca e serviço" persistem no Supabase
+// (nf_forneria.service_eligibility/emitters/emitter_mapping, RLS por
+// organização). Só "Canal de envio" continua em memória — reseta ao
+// recarregar. As demais seções são só exibição, ver
 // TODO.md → "Inventário de dados fixos/fictícios".
 export function Configuracoes() {
   const {
@@ -25,6 +28,8 @@ export function Configuracoes() {
     removeEmitter,
     emitterMapping,
     setEmitterMapping,
+    setEmitterItemListaServico,
+    setEmitterIssRetido,
   } = useSettings()
 
   const [razaoSocial, setRazaoSocial] = useState('')
@@ -138,10 +143,11 @@ export function Configuracoes() {
           </div>
           <p className="mb-4 text-[11.5px] text-faint">
             Qual CNPJ emite a nota de cada serviço, por marca. Um serviço pode usar CNPJs diferentes por marca (ex: Royalties) ou o
-            mesmo CNPJ pras duas (ex: Call Center, quando é uma operação compartilhada).
+            mesmo CNPJ pras duas (ex: Call Center, quando é uma operação compartilhada). O item da lista de serviço (LC 116/2003) e a
+            retenção de ISS dependem do contador — preencha conforme a orientação recebida.
           </p>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] border-collapse">
+            <table className="w-full min-w-[640px] border-collapse">
               <thead>
                 <tr>
                   <th className="border-y border-line bg-[#fafbfc] px-4 py-[10px] text-left text-[10.5px] font-bold uppercase tracking-[.06em] text-faint">
@@ -161,14 +167,34 @@ export function Configuracoes() {
                 {(Object.keys(SERVICE_LABEL) as EligibleServiceType[]).map((service) => (
                   <tr key={service} className="border-b border-line last:border-none">
                     <td className="px-4 py-[10px] text-[13px] font-semibold text-navy">{SERVICE_LABEL[service]}</td>
-                    {franchiseBrands.map((marca) => (
-                      <td key={marca} className="px-4 py-[10px]">
-                        <EmitterSelect
-                          value={emitterMapping[emitterKey(marca, service)] ?? null}
-                          onChange={(id) => setEmitterMapping(marca, service, id)}
-                        />
-                      </td>
-                    ))}
+                    {franchiseBrands.map((marca) => {
+                      const entry = emitterMapping[emitterKey(marca, service)]
+                      return (
+                        <td key={marca} className="px-4 py-[10px] align-top">
+                          <div className="flex min-w-[200px] flex-col gap-2">
+                            <EmitterSelect
+                              value={entry?.emitterId ?? null}
+                              onChange={(id) => setEmitterMapping(marca, service, id)}
+                            />
+                            <input
+                              value={entry?.itemListaServico ?? ''}
+                              onChange={(e) => setEmitterItemListaServico(marca, service, e.target.value)}
+                              placeholder="Item LC 116/2003"
+                              className="w-full rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-[11.5px] text-navy placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-orange-soft"
+                            />
+                            <label className="flex items-center gap-[6px] text-[11px] font-semibold text-faint">
+                              <input
+                                type="checkbox"
+                                checked={entry?.issRetido ?? false}
+                                onChange={(e) => setEmitterIssRetido(marca, service, e.target.checked)}
+                                className="h-[13px] w-[13px] accent-orange"
+                              />
+                              ISS retido na fonte
+                            </label>
+                          </div>
+                        </td>
+                      )
+                    })}
                   </tr>
                 ))}
               </tbody>
