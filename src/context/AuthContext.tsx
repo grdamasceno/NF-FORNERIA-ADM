@@ -32,22 +32,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
 
+    // Se essa busca falhar (rede instável, backend fora do ar por um
+    // instante, etc.), NUNCA deve deixar o app travado em "Carregando..."
+    // pra sempre — por isso o try/catch aqui dentro cobre os dois pontos
+    // que chamam esta função.
     async function loadProfile(userId: string) {
-      const { data, error } = await supabase.from('profiles').select('role, organization_id').eq('id', userId).single()
-      if (cancelled) return
-      if (error || !data) {
+      try {
+        const { data, error } = await supabase.from('profiles').select('role, organization_id').eq('id', userId).single()
+        if (cancelled) return
+        if (error || !data) {
+          setProfile(null)
+          return
+        }
+        setProfile({ role: data.role as UserRole, organizationId: data.organization_id })
+      } catch (err) {
+        if (cancelled) return
+        console.error('Falha ao carregar perfil do usuário:', err)
         setProfile(null)
-        return
       }
-      setProfile({ role: data.role as UserRole, organizationId: data.organization_id })
     }
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (cancelled) return
-      setSession(data.session)
-      if (data.session) await loadProfile(data.session.user.id)
-      setLoading(false)
-    })
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        if (cancelled) return
+        setSession(data.session)
+        if (data.session) await loadProfile(data.session.user.id)
+      })
+      .catch((err) => console.error('Falha ao obter sessão:', err))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
 
     const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       if (cancelled) return
