@@ -16,6 +16,7 @@ interface EditUnitModalProps {
 export function EditUnitModal({ unit, onClose, onSaved }: EditUnitModalProps) {
   const [form, setForm] = useState<UnitEditableFields>({
     name: unit.name,
+    razaoSocial: unit.razaoSocial ?? '',
     cnpj: unit.cnpj ?? '',
     active: unit.active,
     cidade: unit.cidade ?? '',
@@ -44,6 +45,7 @@ export function EditUnitModal({ unit, onClose, onSaved }: EditUnitModalProps) {
     try {
       const normalized: UnitEditableFields = {
         ...form,
+        razaoSocial: form.razaoSocial?.trim() || null,
         cnpj: form.cnpj?.trim() || null,
         cidade: form.cidade?.trim() || null,
         estado: form.estado?.trim() || null,
@@ -80,7 +82,13 @@ export function EditUnitModal({ unit, onClose, onSaved }: EditUnitModalProps) {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Nome" value={form.name} onChange={(v) => set('name', v)} full />
+          <Field label="Nome (fantasia)" value={form.name} onChange={(v) => set('name', v)} />
+          <Field
+            label="Razão social"
+            value={form.razaoSocial ?? ''}
+            onChange={(v) => set('razaoSocial', v)}
+            placeholder="Ex: Forneria Bangu Pizzaria e Restaurante LTDA - EPP"
+          />
           <Field label="CNPJ" value={form.cnpj ?? ''} onChange={(v) => set('cnpj', v)} placeholder="00.000.000/0000-00" />
           <Field label="Telefone" value={form.telefone ?? ''} onChange={(v) => set('telefone', v)} placeholder="(21) 90000-0000" />
           <Field label="E-mail" value={form.email ?? ''} onChange={(v) => set('email', v)} full />

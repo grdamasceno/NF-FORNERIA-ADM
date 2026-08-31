@@ -59,6 +59,10 @@ export interface LiveUnit {
   tenantId: string
   marca: Brand
   name: string
+  // Nome fantasia da unidade (`name`, ex: "Bangu") é distinto da razão
+  // social completa da empresa — a NFS-e exige a razão social como nome do
+  // tomador, não o nome fantasia (migration 0008).
+  razaoSocial: string | null
   cnpj: string | null
   active: boolean
   cidade: string | null

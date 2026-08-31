@@ -16,6 +16,7 @@ interface UnitRow {
   id: string
   tenant_id: string
   name: string
+  razao_social: string | null
   cnpj: string | null
   active: boolean
   cidade: string | null
@@ -41,6 +42,7 @@ function toLiveUnit(row: UnitRow): LiveUnit {
     tenantId: row.tenant_id,
     marca: TENANT_NAME_TO_BRAND[tenantName ?? ''] ?? 'Forneria',
     name: row.name,
+    razaoSocial: row.razao_social,
     cnpj: row.cnpj,
     active: row.active,
     cidade: row.cidade,
@@ -63,7 +65,7 @@ export async function fetchUnits(): Promise<LiveUnit[]> {
   const { data, error } = await supabase
     .from('units')
     .select(
-      'id, tenant_id, name, cnpj, active, cidade, estado, uf, endereco, logradouro, numero, bairro, cep, codigo_municipio, telefone, email, horario, imagem, tenants(name)',
+      'id, tenant_id, name, razao_social, cnpj, active, cidade, estado, uf, endereco, logradouro, numero, bairro, cep, codigo_municipio, telefone, email, horario, imagem, tenants(name)',
     )
     .order('name')
   if (error) throw error
@@ -73,6 +75,7 @@ export async function fetchUnits(): Promise<LiveUnit[]> {
 export type UnitEditableFields = Pick<
   LiveUnit,
   | 'name'
+  | 'razaoSocial'
   | 'cnpj'
   | 'active'
   | 'cidade'
@@ -94,6 +97,7 @@ export async function updateUnit(id: string, patch: UnitEditableFields): Promise
     .from('units')
     .update({
       name: patch.name,
+      razao_social: patch.razaoSocial,
       cnpj: patch.cnpj,
       active: patch.active,
       cidade: patch.cidade,
