@@ -180,9 +180,14 @@ Deno.serve(async (req: Request) => {
     data_emissao: nowInBrasiliaIso(),
     natureza_operacao: '1',
     optante_simples_nacional: true,
+    // Achado real (2026-09-01, Rio de Janeiro/Ambiente Nacional): a Focus
+    // rejeita com E0120 se `inscricao_municipal` vier preenchida mas o
+    // município do prestador não tiver "informações complementares" no CNC
+    // NFS-e do Ambiente Nacional. Só manda se realmente cadastrada, mas
+    // ainda assim isso pode variar por município — revisar se outro
+    // município exigir o campo de volta.
     prestador: {
       cnpj: emitter.cnpj.replace(/\D/g, ''),
-      inscricao_municipal: emitter.inscricao_municipal,
       codigo_municipio: emitter.codigo_municipio,
     },
     tomador: {
