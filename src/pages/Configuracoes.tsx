@@ -26,6 +26,7 @@ export function Configuracoes() {
     emitters,
     addEmitter,
     removeEmitter,
+    updateEmitterFiscalData,
     emitterMapping,
     setEmitterMapping,
     setEmitterItemListaServico,
@@ -87,21 +88,54 @@ export function Configuracoes() {
           </div>
           <p className="mb-4 text-[11.5px] text-faint">
             Cadastre os CNPJs que podem emitir NFS-e. Depois relacione cada um a um serviço por marca na tabela abaixo.
+            Inscrição municipal, código do município e regime tributário são exigidos pela Focus NFe pra emitir de
+            verdade — preencha assim que tiver essa informação.
           </p>
 
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             {emitters.map((e) => (
-              <div key={e.id} className="flex items-center justify-between rounded-[9px] border border-line px-3 py-2">
-                <div>
-                  <div className="text-[13px] font-semibold text-navy">{e.razaoSocial}</div>
-                  <div className="font-display text-[11.5px] font-bold text-faint">{e.cnpj}</div>
+              <div key={e.id} className="rounded-[9px] border border-line px-3 py-3">
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[13px] font-semibold text-navy">{e.razaoSocial}</div>
+                    <div className="font-display text-[11.5px] font-bold text-faint">{e.cnpj}</div>
+                  </div>
+                  <button
+                    onClick={() => removeEmitter(e.id)}
+                    className="flex-shrink-0 rounded-[7px] border border-line px-[10px] py-[5px] text-[11px] font-bold text-red"
+                  >
+                    Remover
+                  </button>
                 </div>
-                <button
-                  onClick={() => removeEmitter(e.id)}
-                  className="rounded-[7px] border border-line px-[10px] py-[5px] text-[11px] font-bold text-red"
-                >
-                  Remover
-                </button>
+                <div className="grid grid-cols-2 gap-2 max-[600px]:grid-cols-1">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-[.06em] text-faint">Inscrição municipal</span>
+                    <input
+                      value={e.inscricaoMunicipal ?? ''}
+                      onChange={(ev) => updateEmitterFiscalData(e.id, { inscricaoMunicipal: ev.target.value || null })}
+                      placeholder="Ex: 1.184.947-4"
+                      className="rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-[12px] text-navy placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-orange-soft"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-[.06em] text-faint">Código do município (IBGE)</span>
+                    <input
+                      value={e.codigoMunicipio ?? ''}
+                      onChange={(ev) => updateEmitterFiscalData(e.id, { codigoMunicipio: ev.target.value || null })}
+                      placeholder="Ex: 3304557"
+                      className="rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-[12px] text-navy placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-orange-soft"
+                    />
+                  </label>
+                </div>
+                <label className="mt-2 flex items-center gap-[6px] text-[11px] font-semibold text-faint">
+                  <input
+                    type="checkbox"
+                    checked={e.optanteSimplesNacional}
+                    onChange={(ev) => updateEmitterFiscalData(e.id, { optanteSimplesNacional: ev.target.checked })}
+                    className="h-[13px] w-[13px] accent-orange"
+                  />
+                  Optante do Simples Nacional
+                </label>
               </div>
             ))}
             {emitters.length === 0 && <p className="text-[12px] text-faint">Nenhum CNPJ cadastrado ainda.</p>}

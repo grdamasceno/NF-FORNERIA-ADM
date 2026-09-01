@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext'
 import {
   addEmitter as addEmitterRemote,
   removeEmitter as removeEmitterRemote,
+  updateEmitterFiscalData as updateEmitterFiscalDataRemote,
   fetchEmitters,
   fetchEmitterMapping,
   upsertEmitterMapping,
@@ -32,6 +33,10 @@ interface SettingsContextValue extends AppSettings {
   setSendChannel: (channel: SendChannel) => void
   addEmitter: (razaoSocial: string, cnpj: string) => void
   removeEmitter: (id: string) => void
+  updateEmitterFiscalData: (
+    id: string,
+    patch: Partial<Pick<EmitterCnpj, 'inscricaoMunicipal' | 'codigoMunicipio' | 'optanteSimplesNacional'>>,
+  ) => void
   setEmitterMapping: (marca: Brand, service: EligibleServiceType, emitterId: string | null) => void
   setEmitterItemListaServico: (marca: Brand, service: EligibleServiceType, value: string) => void
   setEmitterIssRetido: (marca: Brand, service: EligibleServiceType, issRetido: boolean) => void
@@ -155,6 +160,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             setEmitters((prev) => [...prev, created].sort((a, b) => a.razaoSocial.localeCompare(b.razaoSocial))),
           )
           .catch((err) => console.error('Falha ao cadastrar CNPJ emissor:', err.message))
+      },
+      updateEmitterFiscalData: (id, patch) => {
+        setEmitters((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)))
+        updateEmitterFiscalDataRemote(id, patch).catch((err) =>
+          console.error('Falha ao salvar dado fiscal do emissor:', err.message),
+        )
       },
       removeEmitter: (id) => {
         setEmitters((prev) => prev.filter((e) => e.id !== id))

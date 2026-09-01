@@ -13,10 +13,17 @@ const TENANT_NAME_TO_BRAND: Record<string, Brand> = {
   'The Duck': 'The Duck',
 }
 
+// Campos fiscais (inscrição municipal, código do município, Simples
+// Nacional) são exigidos pela Focus NFe pra emitir de verdade, mas nascem
+// vazios/`false` — o cliente completa depois pela própria tela, sem precisar
+// de SQL direto (ver TODO.md → integração Focus NFe).
 export interface LiveEmitter {
   id: string
   razaoSocial: string
   cnpj: string
+  inscricaoMunicipal: string | null
+  codigoMunicipio: string | null
+  optanteSimplesNacional: boolean
 }
 
 // Um emissor pode não ter, ainda, item da lista de serviço/retenção de ISS
@@ -32,18 +39,30 @@ export function emitterKey(marca: Brand, service: EligibleServiceType): string {
   return `${marca}:${service}`
 }
 
+const EMITTER_COLUMNS = 'id, razao_social, cnpj, inscricao_municipal, codigo_municipio, optante_simples_nacional'
+
 interface EmitterRow {
   id: string
   razao_social: string
   cnpj: string
+  inscricao_municipal: string | null
+  codigo_municipio: string | null
+  optante_simples_nacional: boolean
 }
 
 function toLiveEmitter(row: EmitterRow): LiveEmitter {
-  return { id: row.id, razaoSocial: row.razao_social, cnpj: row.cnpj }
+  return {
+    id: row.id,
+    razaoSocial: row.razao_social,
+    cnpj: row.cnpj,
+    inscricaoMunicipal: row.inscricao_municipal,
+    codigoMunicipio: row.codigo_municipio,
+    optanteSimplesNacional: row.optante_simples_nacional,
+  }
 }
 
 export async function fetchEmitters(): Promise<LiveEmitter[]> {
-  const { data, error } = await supabase.from('emitters').select('id, razao_social, cnpj').order('razao_social')
+  const { data, error } = await supabase.from('emitters').select(EMITTER_COLUMNS).order('razao_social')
   if (error) throw error
   return ((data ?? []) as EmitterRow[]).map(toLiveEmitter)
 }
@@ -54,7 +73,7 @@ export async function addEmitter(razaoSocial: string, cnpj: string, organization
   const { data, error } = await supabase
     .from('emitters')
     .insert({ razao_social: razaoSocial, cnpj, organization_id: organizationId })
-    .select('id, razao_social, cnpj')
+    .select(EMITTER_COLUMNS)
     .single()
   if (error) throw error
   return toLiveEmitter(data as EmitterRow)
@@ -62,6 +81,20 @@ export async function addEmitter(razaoSocial: string, cnpj: string, organization
 
 export async function removeEmitter(id: string): Promise<void> {
   const { error } = await supabase.from('emitters').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Campos fiscais que a Focus NFe exige pra emitir — completados pelo cliente
+// direto na tela, sem precisar de SQL (ver TODO.md → integração Focus NFe).
+export async function updateEmitterFiscalData(
+  id: string,
+  patch: Partial<Pick<LiveEmitter, 'inscricaoMunicipal' | 'codigoMunicipio' | 'optanteSimplesNacional'>>,
+): Promise<void> {
+  const dbPatch: Record<string, unknown> = {}
+  if ('inscricaoMunicipal' in patch) dbPatch.inscricao_municipal = patch.inscricaoMunicipal
+  if ('codigoMunicipio' in patch) dbPatch.codigo_municipio = patch.codigoMunicipio
+  if ('optanteSimplesNacional' in patch) dbPatch.optante_simples_nacional = patch.optanteSimplesNacional
+  const { error } = await supabase.from('emitters').update(dbPatch).eq('id', id)
   if (error) throw error
 }
 
