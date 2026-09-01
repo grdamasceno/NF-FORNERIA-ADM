@@ -114,7 +114,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: emitter, error: emitterError } = await supabase
     .from('emitters')
-    .select('id, razao_social, cnpj, inscricao_municipal, codigo_municipio')
+    .select('id, razao_social, cnpj, inscricao_municipal, codigo_municipio, optante_simples_nacional')
     .eq('id', emitterId)
     .single()
   if (emitterError || !emitter) {
@@ -179,7 +179,7 @@ Deno.serve(async (req: Request) => {
   const payload = {
     data_emissao: nowInBrasiliaIso(),
     natureza_operacao: '1',
-    optante_simples_nacional: true,
+    optante_simples_nacional: emitter.optante_simples_nacional,
     // Achado real (2026-09-01, Rio de Janeiro/Ambiente Nacional): a Focus
     // rejeita com E0120 se `inscricao_municipal` vier preenchida mas o
     // município do prestador não tiver "informações complementares" no CNC
