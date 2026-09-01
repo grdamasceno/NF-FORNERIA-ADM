@@ -75,6 +75,16 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
+// `new Date().toISOString()` sempre devolve UTC ("Z") — como o Brasil está
+// 3h atrás (sem horário de verão desde 2019), a Focus NFe rejeita isso como
+// "data de emissão no futuro" (erro E0008). Mandamos o mesmo instante, só
+// que expresso no offset de Brasília, que é o que a DPS/Ambiente Nacional
+// espera.
+function nowInBrasiliaIso(): string {
+  const spTime = new Date(Date.now() - 3 * 60 * 60 * 1000)
+  return spTime.toISOString().replace('Z', '-03:00')
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
     return jsonResponse({ error: 'method_not_allowed', message: 'Use POST.' }, 405)
@@ -167,7 +177,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const payload = {
-    data_emissao: new Date().toISOString(),
+    data_emissao: nowInBrasiliaIso(),
     natureza_operacao: '1',
     optante_simples_nacional: true,
     prestador: {
