@@ -173,6 +173,7 @@ Deno.serve(async (req: Request) => {
     prestador: {
       cnpj: emitter.cnpj.replace(/\D/g, ''),
       inscricao_municipal: emitter.inscricao_municipal,
+      codigo_municipio: emitter.codigo_municipio,
     },
     tomador: {
       ...(tomador.cnpj ? { cnpj: tomador.cnpj.replace(/\D/g, '') } : { cpf: tomador.cpf!.replace(/\D/g, '') }),
