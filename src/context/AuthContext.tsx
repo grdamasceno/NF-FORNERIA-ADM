@@ -24,6 +24,27 @@ interface AuthContextValue {
 // ou `superadmin` (todas).
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+// TEMPORÁRIO (2026-09-02): investigando reload/URL direta travando em
+// "Carregando..." — timeout forçado em cada etapa (nunca deixa o app preso
+// de verdade, mesmo se algo abaixo travar de verdade) + log com tempo
+// decorrido pra achar exatamente qual chamada está lenta. Remover depois que
+// a causa raiz for confirmada e corrigida (ver TODO.md).
+function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout de ${ms}ms em: ${label}`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -31,14 +52,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false
+    const t0 = performance.now()
+    const log = (msg: string) => console.log(`[Auth ${(performance.now() - t0).toFixed(0)}ms]`, msg)
 
     // Se essa busca falhar (rede instável, backend fora do ar por um
     // instante, etc.), NUNCA deve deixar o app travado em "Carregando..."
     // pra sempre — por isso o try/catch aqui dentro cobre os dois pontos
-    // que chamam esta função.
+    // que chamam esta função, com timeout de 8s.
     async function loadProfile(userId: string) {
+      log('loadProfile: início')
       try {
-        const { data, error } = await supabase.from('profiles').select('role, organization_id').eq('id', userId).single()
+        const { data, error } = await withTimeout<{
+          data: { role: string; organization_id: string | null } | null
+          error: { message: string } | null
+        }>(supabase.from('profiles').select('role, organization_id').eq('id', userId).single(), 8000, 'select profiles')
+        log('loadProfile: resolvido')
         if (cancelled) return
         if (error || !data) {
           setProfile(null)
@@ -46,25 +74,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setProfile({ role: data.role as UserRole, organizationId: data.organization_id })
       } catch (err) {
+        log('loadProfile: erro/timeout — ' + String(err))
         if (cancelled) return
         console.error('Falha ao carregar perfil do usuário:', err)
         setProfile(null)
       }
     }
 
-    supabase.auth
-      .getSession()
+    log('effect: chamando getSession()')
+    withTimeout(supabase.auth.getSession(), 8000, 'getSession()')
       .then(async ({ data }) => {
+        log('getSession: resolvido, tem sessão = ' + !!data.session)
         if (cancelled) return
         setSession(data.session)
         if (data.session) await loadProfile(data.session.user.id)
       })
-      .catch((err) => console.error('Falha ao obter sessão:', err))
+      .catch((err) => {
+        log('getSession: erro/timeout — ' + String(err))
+        console.error('Falha ao obter sessão:', err)
+      })
       .finally(() => {
+        log('finally: setLoading(false)')
         if (!cancelled) setLoading(false)
       })
 
     const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+      log('onAuthStateChange: evento = ' + _event)
       if (cancelled) return
       setSession(newSession)
       if (newSession) {
