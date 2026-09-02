@@ -58,6 +58,7 @@ interface EmitirBody {
     valor: number
     discriminacao: string
     itemListaServico?: string // sobrescreve o de emitter_mapping se vier
+    codigoTributarioMunicipio?: string // idem, sobrescreve o de emitter_mapping se vier
     issRetido?: boolean
   }
 }
@@ -207,6 +208,11 @@ Deno.serve(async (req: Request) => {
       valor_servicos: servico.valor,
       iss_retido: servico.issRetido ?? false,
       item_lista_servico: itemListaServico,
+      // Achado real (2026-09-02, suporte da Focus NFe sobre o erro E0312):
+      // além do item nacional acima, o Ambiente Nacional também pode exigir
+      // o código de tributação MUNICIPAL — específico de cada prefeitura,
+      // sem relação numérica com o código nacional.
+      ...(servico.codigoTributarioMunicipio ? { codigo_tributario_municipio: servico.codigoTributarioMunicipio } : {}),
       discriminacao: servico.discriminacao,
       codigo_municipio: emitter.codigo_municipio,
     },

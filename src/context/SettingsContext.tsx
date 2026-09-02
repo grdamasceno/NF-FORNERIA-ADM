@@ -39,11 +39,17 @@ interface SettingsContextValue extends AppSettings {
   ) => void
   setEmitterMapping: (marca: Brand, service: EligibleServiceType, emitterId: string | null) => void
   setEmitterItemListaServico: (marca: Brand, service: EligibleServiceType, value: string) => void
+  setEmitterCodigoTributarioMunicipio: (marca: Brand, service: EligibleServiceType, value: string) => void
   setEmitterIssRetido: (marca: Brand, service: EligibleServiceType, issRetido: boolean) => void
   emitterFor: (marca: Brand, service: EligibleServiceType) => EmitterCnpj | null
 }
 
-const EMPTY_MAPPING_ENTRY: EmitterMappingEntry = { emitterId: null, itemListaServico: null, issRetido: false }
+const EMPTY_MAPPING_ENTRY: EmitterMappingEntry = {
+  emitterId: null,
+  itemListaServico: null,
+  codigoTributarioMunicipio: null,
+  issRetido: false,
+}
 
 // `serviceEligibility`, `emitters` e `emitterMapping` (CNPJ emissor, item da
 // LC 116/2003 e retenção de ISS por marca×serviço) persistem de verdade em
@@ -197,6 +203,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (tenantId) {
           upsertEmitterMapping({ tenantId, service, itemListaServico }).catch((err) =>
             console.error('Falha ao salvar item da lista de serviço:', err.message),
+          )
+        }
+      },
+      setEmitterCodigoTributarioMunicipio: (marca, service, valueText) => {
+        const key = emitterKey(marca, service)
+        const codigoTributarioMunicipio = valueText.trim() || null
+        setEmitterMappingState((prev) => ({
+          ...prev,
+          [key]: { ...(prev[key] ?? EMPTY_MAPPING_ENTRY), codigoTributarioMunicipio },
+        }))
+        const tenantId = tenantIdByBrand[marca]
+        if (tenantId) {
+          upsertEmitterMapping({ tenantId, service, codigoTributarioMunicipio }).catch((err) =>
+            console.error('Falha ao salvar código de tributação municipal:', err.message),
           )
         }
       },

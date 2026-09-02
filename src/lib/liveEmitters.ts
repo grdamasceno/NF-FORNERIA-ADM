@@ -32,6 +32,11 @@ export interface LiveEmitter {
 export interface EmitterMappingEntry {
   emitterId: string | null
   itemListaServico: string | null
+  // Código nacional (LC 116/2003 + desdobro) e código municipal são coisas
+  // distintas, sem relação numérica entre si — a Focus NFe pode exigir os
+  // dois no Ambiente Nacional, dependendo do município (achado real
+  // testando a emissão, 2026-09-02).
+  codigoTributarioMunicipio: string | null
   issRetido: boolean
 }
 
@@ -103,6 +108,7 @@ interface MappingRow {
   service_type: EligibleServiceType
   emitter_id: string | null
   item_lista_servico: string | null
+  codigo_tributario_municipio: string | null
   iss_retido: boolean
   tenants: { name: string } | { name: string }[] | null
 }
@@ -115,7 +121,7 @@ export interface EmitterMappingResult {
 export async function fetchEmitterMapping(): Promise<EmitterMappingResult> {
   const { data, error } = await supabase
     .from('emitter_mapping')
-    .select('tenant_id, service_type, emitter_id, item_lista_servico, iss_retido, tenants(name)')
+    .select('tenant_id, service_type, emitter_id, item_lista_servico, codigo_tributario_municipio, iss_retido, tenants(name)')
   if (error) throw error
 
   const mapping: Record<string, EmitterMappingEntry> = {}
@@ -129,6 +135,7 @@ export async function fetchEmitterMapping(): Promise<EmitterMappingResult> {
     mapping[emitterKey(brand, row.service_type)] = {
       emitterId: row.emitter_id,
       itemListaServico: row.item_lista_servico,
+      codigoTributarioMunicipio: row.codigo_tributario_municipio,
       issRetido: row.iss_retido,
     }
   }
@@ -144,12 +151,14 @@ export async function upsertEmitterMapping(params: {
   service: EligibleServiceType
   emitterId?: string | null
   itemListaServico?: string | null
+  codigoTributarioMunicipio?: string | null
   issRetido?: boolean
 }): Promise<void> {
   const { tenantId, service, ...rest } = params
   const patch: Record<string, unknown> = { tenant_id: tenantId, service_type: service }
   if ('emitterId' in rest) patch.emitter_id = rest.emitterId
   if ('itemListaServico' in rest) patch.item_lista_servico = rest.itemListaServico
+  if ('codigoTributarioMunicipio' in rest) patch.codigo_tributario_municipio = rest.codigoTributarioMunicipio
   if ('issRetido' in rest) patch.iss_retido = rest.issRetido
 
   const { error } = await supabase.from('emitter_mapping').upsert(patch, { onConflict: 'tenant_id,service_type' })

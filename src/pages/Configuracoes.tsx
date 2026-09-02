@@ -30,6 +30,7 @@ export function Configuracoes() {
     emitterMapping,
     setEmitterMapping,
     setEmitterItemListaServico,
+    setEmitterCodigoTributarioMunicipio,
     setEmitterIssRetido,
   } = useSettings()
 
@@ -177,8 +178,8 @@ export function Configuracoes() {
           </div>
           <p className="mb-4 text-[11.5px] text-faint">
             Qual CNPJ emite a nota de cada serviço, por marca. Um serviço pode usar CNPJs diferentes por marca (ex: Royalties) ou o
-            mesmo CNPJ pras duas (ex: Call Center, quando é uma operação compartilhada). O item da lista de serviço (LC 116/2003) e a
-            retenção de ISS dependem do contador — preencha conforme a orientação recebida.
+            mesmo CNPJ pras duas (ex: Call Center, quando é uma operação compartilhada). O item da lista nacional, o código
+            tributário municipal e a retenção de ISS dependem do contador/prefeitura — preencha conforme a orientação recebida.
           </p>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] border-collapse">
@@ -213,7 +214,13 @@ export function Configuracoes() {
                             <input
                               value={entry?.itemListaServico ?? ''}
                               onChange={(e) => setEmitterItemListaServico(marca, service, e.target.value)}
-                              placeholder="Item LC 116/2003"
+                              placeholder="Item lista nacional (ex: 170801)"
+                              className="w-full rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-[11.5px] text-navy placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-orange-soft"
+                            />
+                            <input
+                              value={entry?.codigoTributarioMunicipio ?? ''}
+                              onChange={(e) => setEmitterCodigoTributarioMunicipio(marca, service, e.target.value)}
+                              placeholder="Código tributário municipal"
                               className="w-full rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-[11.5px] text-navy placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-orange-soft"
                             />
                             <label className="flex items-center gap-[6px] text-[11px] font-semibold text-faint">
