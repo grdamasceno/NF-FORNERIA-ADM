@@ -49,7 +49,7 @@ export function Configuracoes() {
       <PageHeader title="Configurações" subtitle="Parâmetros gerais da plataforma" />
 
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
-        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-card">
+        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-panel">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-[14.5px] font-bold text-navy">Emissão de NFS-e por serviço</h3>
             <SimBadge label="AFETA O EMITIR" />
@@ -70,7 +70,7 @@ export function Configuracoes() {
           </div>
         </section>
 
-        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-card" style={{ animationDelay: '.05s' }}>
+        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-panel" style={{ animationDelay: '.05s' }}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-[14.5px] font-bold text-navy">Canal de envio</h3>
             <SimBadge label="AFETA O ENVIAR" />
@@ -82,7 +82,7 @@ export function Configuracoes() {
           </div>
         </section>
 
-        <section className="animate-rise col-span-2 rounded-card border border-line bg-card p-5 shadow-card max-[900px]:col-span-1" style={{ animationDelay: '.08s' }}>
+        <section className="animate-rise col-span-2 rounded-card border border-line bg-card p-5 shadow-panel max-[900px]:col-span-1" style={{ animationDelay: '.08s' }}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-[14.5px] font-bold text-navy">CNPJs emissores</h3>
             <SimBadge label="AFETA O EMITIR" />
@@ -171,7 +171,7 @@ export function Configuracoes() {
           </div>
         </section>
 
-        <section className="animate-rise col-span-2 rounded-card border border-line bg-card p-5 shadow-card max-[900px]:col-span-1" style={{ animationDelay: '.11s' }}>
+        <section className="animate-rise col-span-2 rounded-card border border-line bg-card p-5 shadow-panel max-[900px]:col-span-1" style={{ animationDelay: '.11s' }}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-[14.5px] font-bold text-navy">Emissão por marca e serviço</h3>
             <SimBadge label="AFETA O EMITIR" />
@@ -243,7 +243,7 @@ export function Configuracoes() {
           </div>
         </section>
 
-        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-card" style={{ animationDelay: '.15s' }}>
+        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-panel" style={{ animationDelay: '.15s' }}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-[14.5px] font-bold text-navy">Cobrança</h3>
             <SimBadge label="SÓ EXIBIÇÃO" />
@@ -255,7 +255,7 @@ export function Configuracoes() {
           </div>
         </section>
 
-        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-card" style={{ animationDelay: '.18s' }}>
+        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-panel" style={{ animationDelay: '.18s' }}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-[14.5px] font-bold text-navy">Rede ativa</h3>
             <SimBadge label="SÓ EXIBIÇÃO" />
@@ -267,7 +267,7 @@ export function Configuracoes() {
           </div>
         </section>
 
-        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-card" style={{ animationDelay: '.22s' }}>
+        <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-panel" style={{ animationDelay: '.22s' }}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-[14.5px] font-bold text-navy">Acesso</h3>
             <SimBadge label="SÓ EXIBIÇÃO" />

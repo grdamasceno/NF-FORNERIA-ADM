@@ -71,7 +71,7 @@ export function ManualEntryModal({ onCancel, onConfirm }: ManualEntryModalProps)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <div
-        className="flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-hidden rounded-card border border-line bg-card shadow-card"
+        className="flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-hidden rounded-card border border-line bg-card shadow-panel"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 pb-4 pt-5">

@@ -32,7 +32,13 @@ export default {
         // Sombra pequena e cinza, sem o spread grande de antes — o
         // contorno da superfície fica a cargo da borda (`border-line`),
         // não da sombra (2026-09-03, pedido do usuário).
-        card: '0 2px 6px rgba(15,23,42,.07)',
+        //
+        // NUNCA nomear essa chave "card": colide com `colors.card` acima e
+        // o Tailwind interpreta "shadow-card" como as duas coisas ao mesmo
+        // tempo (tamanho da sombra E "shadow-{color}" usando a cor "card",
+        // branca) — a sombra branca "vencia" e virava o halo borrado branco
+        // que o usuário reclamou desde o início (achado real, 2026-09-03).
+        panel: '0 2px 6px rgba(15,23,42,.07)',
       },
       keyframes: {
         rise: {

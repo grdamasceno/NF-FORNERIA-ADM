@@ -23,7 +23,7 @@ const trendClasses: Record<Trend, string> = {
 export function KpiCard({ icon, iconBg, label, value, cents, trend, trendLabel, sub, delay = 0 }: KpiCardProps) {
   return (
     <div
-      className="animate-rise relative overflow-hidden rounded-card border-l-4 border-orange bg-card p-[17px_18px] shadow-card"
+      className="animate-rise relative overflow-hidden rounded-card border-l-4 border-orange bg-card p-[17px_18px] shadow-panel"
       style={{ animationDelay: `${delay}s` }}
     >
       <div className="mb-[13px] flex h-9 w-9 items-center justify-center rounded-[10px]" style={{ background: iconBg }}>

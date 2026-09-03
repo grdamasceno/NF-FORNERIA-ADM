@@ -92,7 +92,7 @@ export function Franquias() {
         ))}
       </div>
 
-      <section className="animate-rise overflow-hidden rounded-card border border-line bg-card shadow-card" style={{ animationDelay: '.1s' }}>
+      <section className="animate-rise overflow-hidden rounded-card border border-line bg-card shadow-panel" style={{ animationDelay: '.1s' }}>
         <div className="flex items-center justify-between px-5 pb-[13px] pt-[17px]">
           <h3 className="text-[14.5px] font-bold text-navy">
             {loading ? 'Carregando…' : `${filtered.length} unidade${filtered.length === 1 ? '' : 's'}`}

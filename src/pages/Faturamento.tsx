@@ -11,7 +11,7 @@ import { ImportPreviewModal } from '@/components/faturamento/ImportPreviewModal'
 import { ManualEntryModal } from '@/components/faturamento/ManualEntryModal'
 import { mockInvoices } from '@/data/mockInvoices'
 import { importHistory as initialImportHistory, lastImportWarnings, type ImportHistoryEntry } from '@/data/mockFaturamento'
-import { pendingEmissions as defaultPendingEmissions, totalOf, type PendingEmissionRow } from '@/data/pendingEmissions'
+import { totalOf, type PendingEmissionRow } from '@/data/pendingEmissions'
 import type { Brand } from '@/types'
 
 type EmitMode = 'consolidado' | 'separado'
@@ -97,8 +97,11 @@ function servicesOf(row: PendingEmissionRow): Array<{ serviceType: EligibleServi
 // gera boleto/PIX de verdade (nem simulado). Ver TODO.md → "Inventário de
 // dados fixos/fictícios".
 export function Faturamento() {
-  const [pendingEmissions, setPendingEmissions] = useState<PendingEmissionRow[]>(defaultPendingEmissions)
-  const [rows, setRows] = useState<Record<string, RowState>>(() => initialRows(defaultPendingEmissions))
+  // A fila começa vazia — só reflete o que foi de fato importado/preenchido
+  // pra competência atual (`confirmImport`/`confirmManualEntry`), nunca um
+  // exemplo fictício "fantasma" de outro mês (pedido do usuário, 2026-09-03).
+  const [pendingEmissions, setPendingEmissions] = useState<PendingEmissionRow[]>([])
+  const [rows, setRows] = useState<Record<string, RowState>>({})
   const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(initialImportHistory)
   const [preview, setPreview] = useState<{ fileName: string; sheets: ParsedSheet[] } | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
@@ -290,7 +293,7 @@ export function Faturamento() {
 
       <section className="mb-[18px] grid grid-cols-6 gap-3 max-[1080px]:grid-cols-3 max-[560px]:grid-cols-2">
         {statusCounts.map(({ status, count }) => (
-          <div key={status} className="animate-rise rounded-card border border-line bg-card p-4 shadow-card">
+          <div key={status} className="animate-rise rounded-card border border-line bg-card p-4 shadow-panel">
             <div className="mb-2">
               <Tag tone={statusTag[status].tone} label={statusTag[status].label} />
             </div>
@@ -300,7 +303,7 @@ export function Faturamento() {
         ))}
       </section>
 
-      <section className="mb-[18px] animate-rise overflow-hidden rounded-card border border-line bg-card shadow-card" style={{ animationDelay: '.06s' }}>
+      <section className="mb-[18px] animate-rise overflow-hidden rounded-card border border-line bg-card shadow-panel" style={{ animationDelay: '.06s' }}>
         <div className="flex items-center justify-between px-5 pb-[13px] pt-[17px]">
           <div>
             <h3 className="text-[14.5px] font-bold text-navy">Emitir nota fiscal por unidade</h3>
@@ -310,6 +313,14 @@ export function Faturamento() {
           </div>
           <SimBadge label="NFS-e SIMULADA" />
         </div>
+        {pendingEmissions.length === 0 ? (
+          <div className="flex flex-col items-center gap-1 px-5 py-16 text-center">
+            <p className="text-[13px] font-semibold text-navy">
+              Nenhuma unidade preenchida ou importada pra {formatCompetencia(competencia)} ainda
+            </p>
+            <p className="text-[12px] text-faint">Use "Preencher valores" ou "Importar planilha" no topo da tela pra começar.</p>
+          </div>
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1280px] border-collapse">
             <thead>
@@ -468,9 +479,10 @@ export function Faturamento() {
             </tbody>
           </table>
         </div>
+        )}
       </section>
 
-      <section className="mb-[18px] animate-rise rounded-card border border-line bg-card p-5 shadow-card" style={{ animationDelay: '.1s' }}>
+      <section className="mb-[18px] animate-rise rounded-card border border-line bg-card p-5 shadow-panel" style={{ animationDelay: '.1s' }}>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-[14.5px] font-bold text-navy">Última importação</h3>
           <SimBadge label="DADOS FICTÍCIOS" />
@@ -490,7 +502,7 @@ export function Faturamento() {
         )}
       </section>
 
-      <section className="animate-rise overflow-hidden rounded-card border border-line bg-card shadow-card" style={{ animationDelay: '.14s' }}>
+      <section className="animate-rise overflow-hidden rounded-card border border-line bg-card shadow-panel" style={{ animationDelay: '.14s' }}>
         <div className="flex items-center justify-between px-5 pb-[13px] pt-[17px]">
           <h3 className="text-[14.5px] font-bold text-navy">Histórico de importações</h3>
         </div>

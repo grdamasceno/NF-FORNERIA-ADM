@@ -10,7 +10,7 @@ interface RevenueBarChartProps {
 
 export function RevenueBarChart({ labels, issued, received }: RevenueBarChartProps) {
   return (
-    <div className="animate-rise rounded-card border border-line bg-card p-[18px_20px] shadow-card" style={{ animationDelay: '.18s' }}>
+    <div className="animate-rise rounded-card border border-line bg-card p-[18px_20px] shadow-panel" style={{ animationDelay: '.18s' }}>
       <div className="mb-1.5 flex items-center justify-between">
         <div>
           <h3 className="text-[14.5px] font-bold text-navy">Faturamento por mês</h3>

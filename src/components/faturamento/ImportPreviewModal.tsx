@@ -19,7 +19,7 @@ export function ImportPreviewModal({ fileName, sheets, onCancel, onConfirm }: Im
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <div
-        className="max-h-[90vh] w-full max-w-[760px] overflow-y-auto rounded-card border border-line bg-card p-6 shadow-card"
+        className="max-h-[90vh] w-full max-w-[760px] overflow-y-auto rounded-card border border-line bg-card p-6 shadow-panel"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-[16px] font-bold text-navy">Confirmar importação</h3>

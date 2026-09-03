@@ -4,7 +4,7 @@ import { BrandMarkIcon } from '@/components/icons'
 // por tenant — hoje fixo em "Forneria Original", ver seção 5.1 do MD.
 export function CobrandBar() {
   return (
-    <div className="animate-rise mb-4 flex items-center justify-between gap-4 rounded-2xl border border-line bg-card px-4 py-[11px] shadow-card">
+    <div className="animate-rise mb-4 flex items-center justify-between gap-4 rounded-2xl border border-line bg-card px-4 py-[11px] shadow-panel">
       <div className="flex items-center gap-2 text-xs font-medium text-muted">
         <span className="inline-flex items-center gap-1.5 rounded-lg bg-orange-soft px-[9px] py-1 text-[11px] font-bold text-orange">
           <BrandMarkIcon className="h-[13px] w-[13px]" />
