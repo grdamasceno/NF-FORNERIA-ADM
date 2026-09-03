@@ -107,7 +107,30 @@ export function Faturamento() {
   const [importError, setImportError] = useState<string | null>(null)
   const [competencia, setCompetencia] = useState(currentMonthValue())
   const [showManualEntry, setShowManualEntry] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const { serviceEligibility, sendChannel, emitterFor } = useSettings()
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => (prev.size === pendingEmissions.length ? new Set() : new Set(pendingEmissions.map((r) => r.id))))
+  }
+
+  // Exclusão em massa — pra limpar dados de teste rapidamente, sem
+  // depender de status (deixa apagar até já emitida/paga, é só a fila
+  // local desta competência, não desfaz nada real).
+  function deleteSelected() {
+    setPendingEmissions((prev) => prev.filter((r) => !selectedIds.has(r.id)))
+    setRows((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !selectedIds.has(id))))
+    setSelectedIds(new Set())
+  }
 
   async function handleFileSelected(file: File) {
     setImportError(null)
@@ -129,6 +152,7 @@ export function Faturamento() {
     const newRows = toPendingRows(preview.sheets)
     setPendingEmissions(newRows)
     setRows(initialRows(newRows))
+    setSelectedIds(new Set())
     const totalRows = preview.sheets.reduce((sum, s) => sum + s.rows.length, 0)
     const totalWarnings = preview.sheets.reduce((sum, s) => sum + s.warnings.length, 0)
     setImportHistory((prev) => [
@@ -155,6 +179,7 @@ export function Faturamento() {
     setCompetencia(competenciaValue)
     setPendingEmissions(newRows)
     setRows(initialRows(newRows))
+    setSelectedIds(new Set())
     setImportHistory((prev) => [
       {
         id: `manual-${Date.now()}`,
@@ -311,7 +336,17 @@ export function Faturamento() {
               Emite só os serviços habilitados em Configurações · anexe o boleto, marque como pago e envie a cobrança
             </p>
           </div>
-          <SimBadge label="NFS-e SIMULADA" />
+          <div className="flex items-center gap-2">
+            {selectedIds.size > 0 && (
+              <button
+                onClick={deleteSelected}
+                className="whitespace-nowrap rounded-[9px] bg-red px-[12px] py-[7px] text-[11.5px] font-bold text-white"
+              >
+                Excluir selecionadas ({selectedIds.size})
+              </button>
+            )}
+            <SimBadge label="NFS-e SIMULADA" />
+          </div>
         </div>
         {pendingEmissions.length === 0 ? (
           <div className="flex flex-col items-center gap-1 px-5 py-16 text-center">
@@ -325,6 +360,14 @@ export function Faturamento() {
           <table className="w-full min-w-[1280px] border-collapse">
             <thead>
               <tr>
+                <th className="w-[36px] border-y border-line bg-[#fafbfc] px-3 py-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={pendingEmissions.length > 0 && selectedIds.size === pendingEmissions.length}
+                    onChange={toggleSelectAll}
+                    className="h-[14px] w-[14px] accent-orange"
+                  />
+                </th>
                 {['Unidade', 'Call Center', 'Royalties', 'Marketing', 'Total', 'Modo de emissão', 'Ações'].map((h, i) => (
                   <th
                     key={h}
@@ -343,6 +386,14 @@ export function Faturamento() {
                 const eligible = eligibleServices(row)
                 return (
                   <tr key={row.id} className="border-b border-line last:border-none hover:bg-[#fafbfc]">
+                    <td className="px-3 py-[13px]">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(row.id)}
+                        onChange={() => toggleSelected(row.id)}
+                        className="h-[14px] w-[14px] accent-orange"
+                      />
+                    </td>
                     <td className="px-5 py-[13px] text-[13px] font-semibold text-navy">{row.unitName}</td>
                     <td className={`px-5 py-[13px] text-right text-[12px] ${serviceEligibility.call_center ? 'text-muted' : 'text-faint line-through'}`}>
                       {formatBRL(row.callCenterValue)}
