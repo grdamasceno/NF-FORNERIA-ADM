@@ -3,11 +3,12 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { UploadIcon } from '@/components/icons'
 import { SimBadge } from '@/components/SimBadge'
 import { Tag, statusTag } from '@/components/dashboard/statusTags'
-import { formatBRL } from '@/lib/format'
+import { currentMonthValue, formatBRL, formatCompetencia, slugify } from '@/lib/format'
 import { simulateEmailSend, simulateNfseEmission, simulateWhatsappSend } from '@/lib/simulation'
 import { useSettings, type EligibleServiceType, type EmitterCnpj } from '@/context/SettingsContext'
 import { parseSpreadsheet, type ParsedSheet } from '@/lib/spreadsheetParser'
 import { ImportPreviewModal } from '@/components/faturamento/ImportPreviewModal'
+import { ManualEntryModal } from '@/components/faturamento/ManualEntryModal'
 import { mockInvoices } from '@/data/mockInvoices'
 import { importHistory as initialImportHistory, lastImportWarnings, type ImportHistoryEntry } from '@/data/mockFaturamento'
 import { pendingEmissions as defaultPendingEmissions, totalOf, type PendingEmissionRow } from '@/data/pendingEmissions'
@@ -59,15 +60,6 @@ const initialRows = (source: PendingEmissionRow[]): Record<string, RowState> =>
     ]),
   )
 
-function slugify(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '')
-}
-
 // Converte o resultado do parser (por aba/marca) na fila de emissão. Unidade
 // "sem cobrança no mês" fica de fora da fila (seção 3 do MD) — ela já
 // apareceu no preview antes da confirmação, é só não virar fatura.
@@ -110,6 +102,8 @@ export function Faturamento() {
   const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(initialImportHistory)
   const [preview, setPreview] = useState<{ fileName: string; sheets: ParsedSheet[] } | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [competencia, setCompetencia] = useState(currentMonthValue())
+  const [showManualEntry, setShowManualEntry] = useState(false)
   const { serviceEligibility, sendChannel, emitterFor } = useSettings()
 
   async function handleFileSelected(file: File) {
@@ -137,7 +131,7 @@ export function Faturamento() {
     setImportHistory((prev) => [
       {
         id: `import-${Date.now()}`,
-        competencia: 'Junho / 2026',
+        competencia: formatCompetencia(competencia),
         arquivo: preview.fileName,
         importadoEm: new Date().toLocaleString('pt-BR'),
         importadoPor: 'Você',
@@ -148,6 +142,30 @@ export function Faturamento() {
       ...prev,
     ])
     setPreview(null)
+  }
+
+  // Preenchimento manual (alternativa ao upload de planilha) — mesmo
+  // destino que `confirmImport`: substitui a fila de emissão e registra no
+  // histórico, só que a "origem" fica marcada como preenchimento manual em
+  // vez de nome de arquivo.
+  function confirmManualEntry(newRows: PendingEmissionRow[], competenciaValue: string) {
+    setCompetencia(competenciaValue)
+    setPendingEmissions(newRows)
+    setRows(initialRows(newRows))
+    setImportHistory((prev) => [
+      {
+        id: `manual-${Date.now()}`,
+        competencia: formatCompetencia(competenciaValue),
+        arquivo: 'Preenchimento manual',
+        importadoEm: new Date().toLocaleString('pt-BR'),
+        importadoPor: 'Você',
+        unidadesReconhecidas: newRows.length,
+        alertas: 0,
+        status: 'confirmada',
+      },
+      ...prev,
+    ])
+    setShowManualEntry(false)
   }
 
   const statusCounts = (Object.keys(statusTag) as Array<keyof typeof statusTag>).map((status) => ({
@@ -228,10 +246,16 @@ export function Faturamento() {
 
   return (
     <>
-      <PageHeader title="Faturamento" subtitle="Importar planilha, emitir nota, cobrar e enviar — fluxo simulado">
+      <PageHeader title="Faturamento" subtitle="Importar planilha, preencher manualmente, emitir nota, cobrar e enviar — fluxo simulado">
         <div className="flex items-center gap-2 rounded-[11px] border border-line bg-card px-[13px] py-[9px] text-[12.5px] font-semibold text-navy">
-          Competência: Junho / 2026
+          Competência: {formatCompetencia(competencia)}
         </div>
+        <button
+          onClick={() => setShowManualEntry(true)}
+          className="inline-flex items-center gap-2 rounded-[11px] border border-line bg-card px-[15px] py-[10px] text-[12.5px] font-bold text-navy"
+        >
+          Preencher valores
+        </button>
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-[11px] border border-line bg-card px-[15px] py-[10px] text-[12.5px] font-bold text-navy">
           <UploadIcon className="h-4 w-4" /> Importar planilha
           <input
@@ -261,6 +285,8 @@ export function Faturamento() {
       {preview && (
         <ImportPreviewModal fileName={preview.fileName} sheets={preview.sheets} onCancel={() => setPreview(null)} onConfirm={confirmImport} />
       )}
+
+      {showManualEntry && <ManualEntryModal onCancel={() => setShowManualEntry(false)} onConfirm={confirmManualEntry} />}
 
       <section className="mb-[18px] grid grid-cols-6 gap-3 max-[1080px]:grid-cols-3 max-[560px]:grid-cols-2">
         {statusCounts.map(({ status, count }) => (

@@ -1,3 +1,27 @@
+// "2026-09" -> "2026-09" (formato do <input type="month">) e "Setembro / 2026"
+// (formato de exibição já usado no resto da tela de Faturamento).
+export function currentMonthValue(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+export function formatCompetencia(monthValue: string): string {
+  const [year, month] = monthValue.split('-').map(Number)
+  if (!year || !month) return monthValue
+  const label = new Date(year, month - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+  const [mes, ano] = label.split(' de ')
+  return `${mes.charAt(0).toUpperCase()}${mes.slice(1)} / ${ano}`
+}
+
+export function slugify(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
 export function formatBRL(value: number): string {
   return value.toLocaleString('pt-BR', {
     style: 'currency',
