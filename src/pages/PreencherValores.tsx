@@ -107,7 +107,7 @@ export function PreencherValores() {
                 {['Unidade', 'Marca', 'Call Center', 'Royalties', 'Marketing'].map((h, i) => (
                   <th
                     key={h}
-                    className={`border-y border-line bg-[#fafbfc] px-5 py-[11px] text-left text-[10.5px] font-bold uppercase tracking-[.06em] text-faint ${
+                    className={`border border-line bg-[#fafbfc] px-5 py-[11px] text-left text-[10.5px] font-bold uppercase tracking-[.06em] text-faint ${
                       i >= 2 ? 'text-right' : ''
                     }`}
                   >
@@ -120,16 +120,16 @@ export function PreencherValores() {
               {visibleUnits.map((u) => {
                 const v = values[u.id] ?? EMPTY_INPUT
                 return (
-                  <tr key={u.id} className="border-b border-line last:border-none hover:bg-[#fafbfc]">
-                    <td className="px-5 py-[9px] text-[13px] font-semibold text-navy">{u.nome}</td>
-                    <td className="px-5 py-[9px] text-[11.5px] text-faint">{u.marca}</td>
-                    <td className="px-5 py-[9px]">
+                  <tr key={u.id} className="hover:bg-[#fafbfc]">
+                    <td className="border border-line px-5 py-[7px] text-[13px] font-semibold text-navy">{u.nome}</td>
+                    <td className="border border-line px-5 py-[7px] text-[11.5px] text-faint">{u.marca}</td>
+                    <td className="border border-line p-0">
                       <ValueInput value={v.callCenter} onChange={(t) => setField(u.id, 'callCenter', t)} />
                     </td>
-                    <td className="px-5 py-[9px]">
+                    <td className="border border-line p-0">
                       <ValueInput value={v.royalties} onChange={(t) => setField(u.id, 'royalties', t)} />
                     </td>
-                    <td className="px-5 py-[9px]">
+                    <td className="border border-line p-0">
                       <ValueInput value={v.marketing} onChange={(t) => setField(u.id, 'marketing', t)} />
                     </td>
                   </tr>
@@ -150,7 +150,7 @@ function ValueInput({ value, onChange }: { value: string; onChange: (v: string) 
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder="0,00"
-      className="w-[130px] rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-right text-[12.5px] text-navy placeholder:text-faint focus:outline-none focus:ring-1 focus:ring-orange-soft"
+      className="w-full bg-transparent px-5 py-[7px] text-right text-[12.5px] text-navy placeholder:text-faint focus:outline-none focus:ring-1 focus:ring-inset focus:ring-orange-soft"
     />
   )
 }
