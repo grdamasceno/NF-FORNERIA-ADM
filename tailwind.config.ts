@@ -29,7 +29,10 @@ export default {
         card: '16px',
       },
       boxShadow: {
-        card: '0 1px 2px rgba(27,42,60,.04), 0 8px 24px rgba(27,42,60,.06)',
+        // Sombra pequena e cinza, sem o spread grande de antes — o
+        // contorno da superfície fica a cargo da borda (`border-line`),
+        // não da sombra (2026-09-03, pedido do usuário).
+        card: '0 2px 6px rgba(15,23,42,.07)',
       },
       keyframes: {
         rise: {

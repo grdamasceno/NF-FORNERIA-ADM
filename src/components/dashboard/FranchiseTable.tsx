@@ -19,7 +19,7 @@ export function FranchiseTable({ invoices, items, competencia }: FranchiseTableP
   }, [items])
 
   return (
-    <section className="animate-rise overflow-hidden rounded-card bg-card shadow-card" style={{ animationDelay: '.26s' }}>
+    <section className="animate-rise overflow-hidden rounded-card border border-line bg-card shadow-card" style={{ animationDelay: '.26s' }}>
       <div className="flex items-center justify-between px-5 pb-[13px] pt-[17px]">
         <h3 className="text-[14.5px] font-bold text-navy">Franquias · {competencia}</h3>
         <div className="flex gap-2">

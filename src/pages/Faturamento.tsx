@@ -264,7 +264,7 @@ export function Faturamento() {
 
       <section className="mb-[18px] grid grid-cols-6 gap-3 max-[1080px]:grid-cols-3 max-[560px]:grid-cols-2">
         {statusCounts.map(({ status, count }) => (
-          <div key={status} className="animate-rise rounded-card bg-card p-4 shadow-card">
+          <div key={status} className="animate-rise rounded-card border border-line bg-card p-4 shadow-card">
             <div className="mb-2">
               <Tag tone={statusTag[status].tone} label={statusTag[status].label} />
             </div>
@@ -274,7 +274,7 @@ export function Faturamento() {
         ))}
       </section>
 
-      <section className="mb-[18px] animate-rise overflow-hidden rounded-card bg-card shadow-card" style={{ animationDelay: '.06s' }}>
+      <section className="mb-[18px] animate-rise overflow-hidden rounded-card border border-line bg-card shadow-card" style={{ animationDelay: '.06s' }}>
         <div className="flex items-center justify-between px-5 pb-[13px] pt-[17px]">
           <div>
             <h3 className="text-[14.5px] font-bold text-navy">Emitir nota fiscal por unidade</h3>
@@ -444,7 +444,7 @@ export function Faturamento() {
         </div>
       </section>
 
-      <section className="mb-[18px] animate-rise rounded-card bg-card p-5 shadow-card" style={{ animationDelay: '.1s' }}>
+      <section className="mb-[18px] animate-rise rounded-card border border-line bg-card p-5 shadow-card" style={{ animationDelay: '.1s' }}>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-[14.5px] font-bold text-navy">Última importação</h3>
           <SimBadge label="DADOS FICTÍCIOS" />
@@ -464,7 +464,7 @@ export function Faturamento() {
         )}
       </section>
 
-      <section className="animate-rise overflow-hidden rounded-card bg-card shadow-card" style={{ animationDelay: '.14s' }}>
+      <section className="animate-rise overflow-hidden rounded-card border border-line bg-card shadow-card" style={{ animationDelay: '.14s' }}>
         <div className="flex items-center justify-between px-5 pb-[13px] pt-[17px]">
           <h3 className="text-[14.5px] font-bold text-navy">Histórico de importações</h3>
         </div>

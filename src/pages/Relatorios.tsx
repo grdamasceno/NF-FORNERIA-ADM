@@ -13,7 +13,7 @@ export function Relatorios() {
       </PageHeader>
 
       <section className="mb-[18px] grid grid-cols-[2fr_1fr] gap-4 max-[1080px]:grid-cols-1">
-        <div className="animate-rise rounded-card bg-card p-5 shadow-card">
+        <div className="animate-rise rounded-card border border-line bg-card p-5 shadow-card">
           <h3 className="mb-4 text-[14.5px] font-bold text-navy">Faturamento por trimestre</h3>
           <div className="flex items-end gap-3">
             {quarterlyRevenue.map((q) => {
@@ -32,14 +32,14 @@ export function Relatorios() {
           </div>
         </div>
 
-        <div className="animate-rise rounded-card bg-card p-5 shadow-card" style={{ animationDelay: '.06s' }}>
+        <div className="animate-rise rounded-card border border-line bg-card p-5 shadow-card" style={{ animationDelay: '.06s' }}>
           <h3 className="mb-1 text-[14.5px] font-bold text-navy">Ticket médio por unidade</h3>
           <div className="num mt-2 text-[30px] text-navy">{formatBRL(averageTicket)}</div>
           <div className="mt-1 text-[11.5px] text-faint">Junho / 2026 · base fictícia</div>
         </div>
       </section>
 
-      <section className="animate-rise rounded-card bg-card p-5 shadow-card" style={{ animationDelay: '.1s' }}>
+      <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-card" style={{ animationDelay: '.1s' }}>
         <h3 className="mb-4 text-[14.5px] font-bold text-navy">Top 5 unidades por faturamento</h3>
         <div className="flex flex-col gap-3">
           {topUnits.map((u, i) => (

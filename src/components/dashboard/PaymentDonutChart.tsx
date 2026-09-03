@@ -11,7 +11,7 @@ export function PaymentDonutChart({ paid, dueSoon, overdue }: PaymentDonutChartP
   const total = paid + dueSoon + overdue
 
   return (
-    <div className="animate-rise rounded-card bg-card p-[18px_20px] shadow-card" style={{ animationDelay: '.22s' }}>
+    <div className="animate-rise rounded-card border border-line bg-card p-[18px_20px] shadow-card" style={{ animationDelay: '.22s' }}>
       <div className="mb-1.5 flex items-center justify-between">
         <h3 className="text-[14.5px] font-bold text-navy">Status de pagamento</h3>
         <span className="text-[11.5px] text-faint">{total} cobranças</span>
