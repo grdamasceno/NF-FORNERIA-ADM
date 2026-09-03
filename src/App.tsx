@@ -6,6 +6,7 @@ import { Login } from '@/pages/Login'
 import { Dashboard } from '@/pages/Dashboard'
 import { Franquias } from '@/pages/Franquias'
 import { Faturamento } from '@/pages/Faturamento'
+import { PreencherValores } from '@/pages/PreencherValores'
 import { Relatorios } from '@/pages/Relatorios'
 import { Configuracoes } from '@/pages/Configuracoes'
 
@@ -30,6 +31,7 @@ function Gate() {
           <Route index element={<Dashboard />} />
           <Route path="franquias" element={<Franquias />} />
           <Route path="faturamento" element={<Faturamento />} />
+          <Route path="faturamento/preencher" element={<PreencherValores />} />
           <Route path="relatorios" element={<Relatorios />} />
           <Route path="configuracoes" element={<Configuracoes />} />
         </Route>

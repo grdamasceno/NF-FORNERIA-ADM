@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { UploadIcon } from '@/components/icons'
 import { SimBadge } from '@/components/SimBadge'
@@ -8,7 +9,6 @@ import { simulateEmailSend, simulateNfseEmission, simulateWhatsappSend } from '@
 import { useSettings, type EligibleServiceType, type EmitterCnpj } from '@/context/SettingsContext'
 import { parseSpreadsheet, type ParsedSheet } from '@/lib/spreadsheetParser'
 import { ImportPreviewModal } from '@/components/faturamento/ImportPreviewModal'
-import { ManualEntryModal } from '@/components/faturamento/ManualEntryModal'
 import { mockInvoices } from '@/data/mockInvoices'
 import { importHistory as initialImportHistory, lastImportWarnings, type ImportHistoryEntry } from '@/data/mockFaturamento'
 import { totalOf, type PendingEmissionRow } from '@/data/pendingEmissions'
@@ -106,9 +106,24 @@ export function Faturamento() {
   const [preview, setPreview] = useState<{ fileName: string; sheets: ParsedSheet[] } | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [competencia, setCompetencia] = useState(currentMonthValue())
-  const [showManualEntry, setShowManualEntry] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const { serviceEligibility, sendChannel, emitterFor } = useSettings()
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  // "Preencher valores" é página própria agora (`/faturamento/preencher`,
+  // mais espaço que modal pras 69 unidades) — ao confirmar lá, ela volta
+  // pra cá levando o resultado via `navigate(..., { state })`. Consome uma
+  // vez só e limpa o state (senão reaplicaria de novo em qualquer reload
+  // desta página).
+  useEffect(() => {
+    const state = location.state as { manualEntryRows?: PendingEmissionRow[]; manualEntryCompetencia?: string } | null
+    if (state?.manualEntryRows) {
+      confirmManualEntry(state.manualEntryRows, state.manualEntryCompetencia ?? competencia)
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   function toggleSelected(id: string) {
     setSelectedIds((prev) => {
@@ -193,7 +208,6 @@ export function Faturamento() {
       },
       ...prev,
     ])
-    setShowManualEntry(false)
   }
 
   const statusCounts = (Object.keys(statusTag) as Array<keyof typeof statusTag>).map((status) => ({
@@ -279,7 +293,7 @@ export function Faturamento() {
           Competência: {formatCompetencia(competencia)}
         </div>
         <button
-          onClick={() => setShowManualEntry(true)}
+          onClick={() => navigate('/faturamento/preencher')}
           className="inline-flex items-center gap-2 rounded-[11px] border border-line bg-card px-[15px] py-[10px] text-[12.5px] font-bold text-navy"
         >
           Preencher valores
@@ -313,8 +327,6 @@ export function Faturamento() {
       {preview && (
         <ImportPreviewModal fileName={preview.fileName} sheets={preview.sheets} onCancel={() => setPreview(null)} onConfirm={confirmImport} />
       )}
-
-      {showManualEntry && <ManualEntryModal onCancel={() => setShowManualEntry(false)} onConfirm={confirmManualEntry} />}
 
       <section className="mb-[18px] grid grid-cols-6 gap-3 max-[1080px]:grid-cols-3 max-[560px]:grid-cols-2">
         {statusCounts.map(({ status, count }) => (
