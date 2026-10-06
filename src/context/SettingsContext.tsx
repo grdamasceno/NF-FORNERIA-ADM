@@ -6,6 +6,7 @@ import {
   addEmitter as addEmitterRemote,
   removeEmitter as removeEmitterRemote,
   updateEmitterFiscalData as updateEmitterFiscalDataRemote,
+  uploadCertificado as uploadCertificadoRemote,
   fetchEmitters,
   fetchEmitterMapping,
   upsertEmitterMapping,
@@ -35,8 +36,14 @@ interface SettingsContextValue extends AppSettings {
   removeEmitter: (id: string) => void
   updateEmitterFiscalData: (
     id: string,
-    patch: Partial<Pick<EmitterCnpj, 'inscricaoMunicipal' | 'codigoMunicipio' | 'optanteSimplesNacional'>>,
+    patch: Partial<Pick<EmitterCnpj, 'inscricaoMunicipal' | 'codigoMunicipio' | 'optanteSimplesNacional' | 'focusEmpresaId'>>,
   ) => void
+  uploadCertificado: (params: {
+    emitterId: string
+    ambiente: 'homologacao' | 'producao'
+    arquivoBase64: string
+    senha: string
+  }) => Promise<void>
   setEmitterMapping: (marca: Brand, service: EligibleServiceType, emitterId: string | null) => void
   setEmitterItemListaServico: (marca: Brand, service: EligibleServiceType, value: string) => void
   setEmitterCodigoTributarioMunicipio: (marca: Brand, service: EligibleServiceType, value: string) => void
@@ -172,6 +179,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateEmitterFiscalDataRemote(id, patch).catch((err) =>
           console.error('Falha ao salvar dado fiscal do emissor:', err.message),
         )
+      },
+      uploadCertificado: async (params) => {
+        const { certificadoValidoAte } = await uploadCertificadoRemote(params)
+        setEmitters((prev) => prev.map((e) => (e.id === params.emitterId ? { ...e, certificadoValidoAte } : e)))
       },
       removeEmitter: (id) => {
         setEmitters((prev) => prev.filter((e) => e.id !== id))

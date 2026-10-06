@@ -24,6 +24,8 @@ export interface LiveEmitter {
   inscricaoMunicipal: string | null
   codigoMunicipio: string | null
   optanteSimplesNacional: boolean
+  focusEmpresaId: string | null
+  certificadoValidoAte: string | null
 }
 
 // Um emissor pode não ter, ainda, item da lista de serviço/retenção de ISS
@@ -44,7 +46,8 @@ export function emitterKey(marca: Brand, service: EligibleServiceType): string {
   return `${marca}:${service}`
 }
 
-const EMITTER_COLUMNS = 'id, razao_social, cnpj, inscricao_municipal, codigo_municipio, optante_simples_nacional'
+const EMITTER_COLUMNS =
+  'id, razao_social, cnpj, inscricao_municipal, codigo_municipio, optante_simples_nacional, focus_empresa_id, certificado_valido_ate'
 
 interface EmitterRow {
   id: string
@@ -53,6 +56,8 @@ interface EmitterRow {
   inscricao_municipal: string | null
   codigo_municipio: string | null
   optante_simples_nacional: boolean
+  focus_empresa_id: string | null
+  certificado_valido_ate: string | null
 }
 
 function toLiveEmitter(row: EmitterRow): LiveEmitter {
@@ -63,7 +68,32 @@ function toLiveEmitter(row: EmitterRow): LiveEmitter {
     inscricaoMunicipal: row.inscricao_municipal,
     codigoMunicipio: row.codigo_municipio,
     optanteSimplesNacional: row.optante_simples_nacional,
+    focusEmpresaId: row.focus_empresa_id,
+    certificadoValidoAte: row.certificado_valido_ate,
   }
+}
+
+export async function uploadCertificado(params: {
+  emitterId: string
+  ambiente: 'homologacao' | 'producao'
+  arquivoBase64: string
+  senha: string
+}): Promise<{ certificadoValidoAte: string | null }> {
+  const { data: sessionData } = await supabase.auth.getSession()
+  const accessToken = sessionData.session?.access_token
+  if (!accessToken) throw new Error('Sessão expirada — faça login de novo.')
+
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-certificado`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  const body = await resp.json().catch(() => null)
+  if (!resp.ok) {
+    const msg = body?.body?.mensagem ?? body?.message ?? body?.error ?? `Falha ao enviar certificado (HTTP ${resp.status}).`
+    throw new Error(String(msg))
+  }
+  return { certificadoValidoAte: body?.certificado_valido_ate ?? null }
 }
 
 export async function fetchEmitters(): Promise<LiveEmitter[]> {
@@ -93,12 +123,13 @@ export async function removeEmitter(id: string): Promise<void> {
 // direto na tela, sem precisar de SQL (ver TODO.md → integração Focus NFe).
 export async function updateEmitterFiscalData(
   id: string,
-  patch: Partial<Pick<LiveEmitter, 'inscricaoMunicipal' | 'codigoMunicipio' | 'optanteSimplesNacional'>>,
+  patch: Partial<Pick<LiveEmitter, 'inscricaoMunicipal' | 'codigoMunicipio' | 'optanteSimplesNacional' | 'focusEmpresaId'>>,
 ): Promise<void> {
   const dbPatch: Record<string, unknown> = {}
   if ('inscricaoMunicipal' in patch) dbPatch.inscricao_municipal = patch.inscricaoMunicipal
   if ('codigoMunicipio' in patch) dbPatch.codigo_municipio = patch.codigoMunicipio
   if ('optanteSimplesNacional' in patch) dbPatch.optante_simples_nacional = patch.optanteSimplesNacional
+  if ('focusEmpresaId' in patch) dbPatch.focus_empresa_id = patch.focusEmpresaId
   const { error } = await supabase.from('emitters').update(dbPatch).eq('id', id)
   if (error) throw error
 }

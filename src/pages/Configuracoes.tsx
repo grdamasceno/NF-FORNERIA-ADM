@@ -137,6 +137,17 @@ export function Configuracoes() {
                   />
                   Optante do Simples Nacional
                 </label>
+                <label className="mt-2 flex flex-col gap-1">
+                  <span className="text-[9.5px] font-bold uppercase tracking-[.05em] text-faint">ID da empresa na Focus NFe</span>
+                  <input
+                    value={e.focusEmpresaId ?? ''}
+                    onChange={(ev) => updateEmitterFiscalData(e.id, { focusEmpresaId: ev.target.value || null })}
+                    placeholder="Ex: 12345"
+                    className="rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-[12px] text-navy placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-orange-soft"
+                  />
+                </label>
+                <CertificadoForm emitterId={e.id} validoAte={e.certificadoValidoAte} />
+
               </div>
             ))}
             {emitters.length === 0 && <p className="text-[12px] text-faint">Nenhum CNPJ cadastrado ainda.</p>}
@@ -279,6 +290,89 @@ export function Configuracoes() {
         </section>
       </div>
     </>
+  )
+}
+
+function CertificadoForm({ emitterId, validoAte }: { emitterId: string; validoAte: string | null }) {
+  const { uploadCertificado } = useSettings()
+  const [ambiente, setAmbiente] = useState<'homologacao' | 'producao'>('homologacao')
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [senha, setSenha] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [mensagem, setMensagem] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+
+  const diasRestantes = validoAte ? Math.ceil((new Date(validoAte).getTime() - Date.now()) / 86400000) : null
+
+  async function enviar() {
+    if (!arquivo || !senha) return
+    setEnviando(true)
+    setMensagem(null)
+    try {
+      const buffer = await arquivo.arrayBuffer()
+      let binary = ''
+      new Uint8Array(buffer).forEach((b) => (binary += String.fromCharCode(b)))
+      await uploadCertificado({ emitterId, ambiente, arquivoBase64: btoa(binary), senha })
+      setMensagem({ tipo: 'ok', texto: 'Certificado enviado para a Focus.' })
+      setArquivo(null)
+      setSenha('')
+    } catch (err) {
+      setMensagem({ tipo: 'erro', texto: err instanceof Error ? err.message : 'Falha ao enviar certificado.' })
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-[8px] bg-[#fafbfc] p-3">
+      <div className="mb-2 flex items-center justify-between text-[11px] font-semibold">
+        <span className="text-faint">Certificado digital</span>
+        {diasRestantes === null ? (
+          <span className="text-faint">não informado</span>
+        ) : diasRestantes < 0 ? (
+          <span className="text-red">vencido</span>
+        ) : diasRestantes <= 30 ? (
+          <span className="text-amber">vence em {diasRestantes} dias</span>
+        ) : (
+          <span className="text-green">válido até {new Date(validoAte!).toLocaleDateString('pt-BR')}</span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2 max-[600px]:grid-cols-1">
+        <select
+          value={ambiente}
+          onChange={(e) => setAmbiente(e.target.value as 'homologacao' | 'producao')}
+          className="rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-[12px] text-navy"
+        >
+          <option value="homologacao">Homologação</option>
+          <option value="producao">Produção</option>
+        </select>
+        <input
+          type="password"
+          value={senha}
+          onChange={(e) => setSenha(e.target.value)}
+          placeholder="Senha do certificado"
+          className="rounded-[8px] border border-line bg-white px-[9px] py-[6px] text-[12px] text-navy placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-orange-soft"
+        />
+        <input
+          type="file"
+          accept=".pfx,.p12"
+          onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
+          className="col-span-2 text-[11px] text-muted max-[600px]:col-span-1"
+        />
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="text-[10.5px] text-faint">O arquivo e a senha não são guardados — só enviados pra Focus.</span>
+        <button
+          onClick={enviar}
+          disabled={!arquivo || !senha || enviando}
+          className="rounded-[8px] bg-orange px-3 py-[6px] text-[11.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {enviando ? 'Enviando…' : 'Enviar certificado'}
+        </button>
+      </div>
+      {mensagem && (
+        <p className={`mt-2 text-[11.5px] font-semibold ${mensagem.tipo === 'ok' ? 'text-green' : 'text-red'}`}>{mensagem.texto}</p>
+      )}
+    </div>
   )
 }
 
