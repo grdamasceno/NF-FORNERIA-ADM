@@ -191,6 +191,7 @@ Deno.serve(async (req: Request) => {
     codigo_municipio_emissora: Number(emitter.codigo_municipio),
     cnpj_prestador: emitter.cnpj.replace(/\D/g, ''),
     codigo_opcao_simples_nacional: isSimples ? 3 : 1,
+    ...(isSimples ? { regime_tributario_simples_nacional: 1 } : {}),
     regime_especial_tributacao: Number(emitter.regime_especial_tributacao ?? 0),
     ...(tomador.cnpj
       ? { cnpj_tomador: tomador.cnpj.replace(/\D/g, '') }
