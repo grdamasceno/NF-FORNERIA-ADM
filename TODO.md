@@ -140,6 +140,26 @@ Introduz o nível "empresa" acima de `tenants` (marca): **`organizations`** — 
 - [ ] Logo/cor do cliente dinâmicos a partir de `tenant.logo_url` / `tenant.primary_color` (hoje a caixa do logo do cliente na CobrandBar é um placeholder sem imagem)
 
 ### 8. Integração real com a Focus NFe (seção 8 do MD)
+
+**Status (2026-10-06): homologação validada nos 3 emissores** — FORNERIA ORIGINAL FRANQUIAS (Royalties, Lucro Presumido), FORNERIA ORIGINAL CALLCENTER (Call Center, Simples ME/EPP) e THE DUCK FRANQUIAS (Royalties, Lucro Presumido, confirmado pelo contador) emitiram notas autorizadas no endpoint `/v2/nfsen` (Ambiente Nacional).
+
+Achados que destravaram a emissão (ver histórico do chat/commits):
+- Endpoint do Ambiente Nacional é `/v2/nfsen` (payload DPS plano), não o legado `/v2/nfse`.
+- Código tributário nacional: Royalties `170801`, Call Center `170203`. Código municipal (`codigo_tributacao_municipal_iss`, `cTribMun`): `001` pros dois, confirmado por notas autorizadas de produção.
+- Regime do Simples ME/EPP: `codigo_opcao_simples_nacional = 3` + `regime_tributario_simples_nacional = 1`, com `regime_especial_tributacao = 0` (E0175).
+- Lucro Presumido: `codigo_opcao_simples_nacional = 1`, sem `regime_tributario_simples_nacional`.
+- Inscrição municipal do prestador é suprimida pro Rio (E0120).
+- Alíquota ISS nas notas reais: 2% (tabela oficial indica 3%, conferir com o contador).
+- Cadastro na Focus precisa bater com o regime real: THE DUCK estava divergente (Focus Regime Normal x banco Simples) até o ajuste.
+
+Pendências:
+- [ ] Rodar migration `0013_emitter_certificado.sql` no Studio.
+- [ ] Subir `supabase/functions/upload-certificado/index.ts` pro servidor (volume `/data/coolify/services/f10adzxf3tj2vgq2mhh5z1no/volumes/functions/upload-certificado/`), usando curl do commit `a70076f`.
+- [ ] Preencher o ID da empresa na Focus (campo "ID da empresa na Focus NFe" em Configurações) pros 3 emissores.
+- [ ] Ligar o botão "Emitir" do app à função real (hoje ainda simula) — agora que o fluxo de homologação está validado.
+- [ ] Decidir quando ligar o ambiente de produção (toggles e tokens de produção em `emitter_credentials`).
+- [ ] Alíquota ISS: mandar `aliquota` no payload (notas reais usam 2%), confirmar com o contador.
+- [ ] `codigo_cnae`: confirmar se é obrigatório no Ambiente Nacional.
 Já existem 3 CNPJs cadastrados na Focus NFe com token de homologação e produção — este item é sobre ligar o `simulateNfseEmission` fictício à API de verdade.
 
 - [x] Pesquisada a API real da Focus NFe (2026-08-27): `POST /v2/nfse?ref=...` (Basic Auth, token como usuário, senha em branco), assíncrona — devolve `processando_autorizacao` e só fica `autorizado`/`erro_autorizacao` depois, consultável em `GET /v2/nfse/{ref}`. Bases: `https://homologacao.focusnfe.com.br` / `https://api.focusnfe.com.br`.
