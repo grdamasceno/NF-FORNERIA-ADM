@@ -59,6 +59,7 @@ interface EmitirBody {
     discriminacao: string
     itemListaServico?: string // sobrescreve o de emitter_mapping se vier
     codigoTributarioMunicipio?: string // idem, sobrescreve o de emitter_mapping se vier
+    percentualTotalTributos?: number // teste: bloco trib exigido pelo Ambiente Nacional
     issRetido?: boolean
   }
 }
@@ -214,6 +215,7 @@ Deno.serve(async (req: Request) => {
       // o código de tributação MUNICIPAL — específico de cada prefeitura,
       // sem relação numérica com o código nacional.
       ...(servico.codigoTributarioMunicipio ? { codigo_tributario_municipio: servico.codigoTributarioMunicipio } : {}),
+      ...(servico.percentualTotalTributos !== undefined ? { percentual_total_tributos: servico.percentualTotalTributos } : {}),
       discriminacao: servico.discriminacao,
       codigo_municipio: emitter.codigo_municipio,
     },
