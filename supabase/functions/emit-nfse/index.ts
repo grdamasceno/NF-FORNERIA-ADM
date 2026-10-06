@@ -178,50 +178,44 @@ Deno.serve(async (req: Request) => {
     )
   }
 
+  // Payload do DPS Nacional (doc.focusnfe.com.br/reference/enviar_dps_nacional),
+  // endpoint /v2/nfsen. Campos planos, diferentes do legado /v2/nfse.
+  // Regra do Simples: codigo_opcao_simples_nacional 1 = não optante,
+  // 3 = ME/EPP Simples (2 = MEI, que não usamos).
+  // Inscrição municipal do prestador é suprimida — o Rio não tem IM cadastrada
+  // no emissor nacional (E0120).
+  const isSimples = emitter.optante_simples_nacional
   const payload = {
     data_emissao: nowInBrasiliaIso(),
-    natureza_operacao: '1',
-    optante_simples_nacional: emitter.optante_simples_nacional,
-    ...(emitter.regime_especial_tributacao ? { regime_especial_tributacao: emitter.regime_especial_tributacao } : {}),
-    // Achado real (2026-09-01, Rio de Janeiro/Ambiente Nacional): a Focus
-    // rejeita com E0120 se `inscricao_municipal` vier preenchida mas o
-    // município do prestador não tiver "informações complementares" no CNC
-    // NFS-e do Ambiente Nacional. Só manda se realmente cadastrada, mas
-    // ainda assim isso pode variar por município — revisar se outro
-    // município exigir o campo de volta.
-    prestador: {
-      cnpj: emitter.cnpj.replace(/\D/g, ''),
-      codigo_municipio: emitter.codigo_municipio,
-    },
-    tomador: {
-      ...(tomador.cnpj ? { cnpj: tomador.cnpj.replace(/\D/g, '') } : { cpf: tomador.cpf!.replace(/\D/g, '') }),
-      razao_social: tomador.razaoSocial,
-      ...(tomador.email ? { email: tomador.email } : {}),
-      endereco: {
-        logradouro: tomador.endereco.logradouro,
-        numero: tomador.endereco.numero,
-        bairro: tomador.endereco.bairro,
-        codigo_municipio: tomador.endereco.codigoMunicipio,
-        uf: tomador.endereco.uf,
-        cep: tomador.endereco.cep.replace(/\D/g, ''),
-      },
-    },
-    servico: {
-      valor_servicos: servico.valor,
-      iss_retido: servico.issRetido ?? false,
-      item_lista_servico: itemListaServico,
-      // Achado real (2026-09-02, suporte da Focus NFe sobre o erro E0312):
-      // além do item nacional acima, o Ambiente Nacional também pode exigir
-      // o código de tributação MUNICIPAL — específico de cada prefeitura,
-      // sem relação numérica com o código nacional.
-      ...(servico.codigoTributarioMunicipio ? { codigo_tributario_municipio: servico.codigoTributarioMunicipio } : {}),
-      ...(servico.percentualTotalTributos !== undefined ? { percentual_total_tributos: servico.percentualTotalTributos } : {}),
-      discriminacao: servico.discriminacao,
-      codigo_municipio: emitter.codigo_municipio,
-    },
+    data_competencia: nowInBrasiliaIso().slice(0, 10),
+    codigo_municipio_emissora: Number(emitter.codigo_municipio),
+    cnpj_prestador: emitter.cnpj.replace(/\D/g, ''),
+    codigo_opcao_simples_nacional: isSimples ? 3 : 1,
+    regime_especial_tributacao: Number(emitter.regime_especial_tributacao ?? 0),
+    ...(tomador.cnpj
+      ? { cnpj_tomador: tomador.cnpj.replace(/\D/g, '') }
+      : { cpf_tomador: tomador.cpf!.replace(/\D/g, '') }),
+    razao_social_tomador: tomador.razaoSocial,
+    ...(tomador.email ? { email_tomador: tomador.email } : {}),
+    codigo_municipio_tomador: Number(tomador.endereco.codigoMunicipio),
+    cep_tomador: tomador.endereco.cep.replace(/\D/g, ''),
+    logradouro_tomador: tomador.endereco.logradouro,
+    numero_tomador: tomador.endereco.numero,
+    bairro_tomador: tomador.endereco.bairro,
+    codigo_municipio_prestacao: Number(emitter.codigo_municipio),
+    codigo_tributacao_nacional_iss: itemListaServico,
+    ...(servico.codigoTributarioMunicipio ? { codigo_tributacao_municipal_iss: servico.codigoTributarioMunicipio } : {}),
+    descricao_servico: servico.discriminacao,
+    valor_servico: servico.valor,
+    tributacao_iss: 1,
+    tipo_retencao_iss: servico.issRetido ? 2 : 1,
+    percentual_total_tributos_federais: '0.00',
+    percentual_total_tributos_estaduais: '0.00',
+    percentual_total_tributos_municipais: '0.00',
+    situacao_tributaria_pis_cofins: isSimples ? '08' : '01',
   }
 
-  const emitResp = await fetch(`${baseUrl}/v2/nfse?ref=${encodeURIComponent(ref)}`, {
+  const emitResp = await fetch(`${baseUrl}/v2/nfsen?ref=${encodeURIComponent(ref)}`, {
     method: 'POST',
     headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -247,7 +241,7 @@ Deno.serve(async (req: Request) => {
 })
 
 async function consultarNfse(baseUrl: string, authHeader: string, ref: string) {
-  const resp = await fetch(`${baseUrl}/v2/nfse/${encodeURIComponent(ref)}`, {
+  const resp = await fetch(`${baseUrl}/v2/nfsen/${encodeURIComponent(ref)}`, {
     headers: { Authorization: authHeader },
   })
   const body = await resp.json().catch(() => null)
