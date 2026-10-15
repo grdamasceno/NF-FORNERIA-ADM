@@ -5,45 +5,29 @@ import { UploadIcon } from '@/components/icons'
 import { Tag, statusTag } from '@/components/dashboard/statusTags'
 import { brandFromTenantName, currentMonthValue, formatBRL, formatCompetencia, slugify } from '@/lib/format'
 import { simulateEmailSend, simulateWhatsappSend } from '@/lib/simulation'
-import { useSettings, type EligibleServiceType, type EmitterCnpj, type EmitterMappingEntry } from '@/context/SettingsContext'
+import { useSettings, type EligibleServiceType, type EmitterMappingEntry } from '@/context/SettingsContext'
 import { emitterKey } from '@/lib/liveEmitters'
 import { emitirNfseReal } from '@/lib/emitNfse'
 import { fetchUnits } from '@/lib/liveUnits'
+import {
+  deleteInvoices,
+  fetchInvoiceRows,
+  markInvoiceSent,
+  recordEmissionResult,
+  saveQueueRows,
+  updateInvoiceBoleto,
+  updateInvoicePayment,
+  updateInvoiceStatus,
+  type LiveInvoiceRow,
+} from '@/lib/liveInvoices'
 import { parseSpreadsheet, type ParsedSheet } from '@/lib/spreadsheetParser'
 import { ImportPreviewModal } from '@/components/faturamento/ImportPreviewModal'
 import { rowMatchKey, UnitMatchModal, type UnitMatches } from '@/components/faturamento/UnitMatchModal'
-import { mockInvoices } from '@/data/mockInvoices'
-import { totalOf, type PendingEmissionRow } from '@/data/pendingEmissions'
+import { type PendingEmissionRow } from '@/data/pendingEmissions'
 import type { LiveUnit } from '@/types'
 
-type NfseRowStatus = 'pendente' | 'emitindo' | 'emitida'
-type PaymentStatus = 'a_pagar' | 'pago'
-type SendStatus = 'nao_enviado' | 'enviando' | 'enviado'
-
-interface EmittedItem {
-  serviceType: EligibleServiceType
-  label: string
-  value: number
-  nfseNumber: string | null
-  urlDanfse: string | null
-  emitter: EmitterCnpj | null
-}
-
-interface RowState {
-  status: NfseRowStatus
-  items: EmittedItem[]
-  showNfse: boolean
-  boletoFileName: string | null
-  payment: PaymentStatus
-  send: SendStatus
-  lastError: string | null
-}
-
 const EMPTY_MAPPING: EmitterMappingEntry = { emitterId: null, itemListaServico: null, codigoTributarioMunicipio: null, issRetido: false }
-
-function hasDadoFiscalCompleto(u: LiveUnit): boolean {
-  return !!(u.cnpj && u.razaoSocial && u.logradouro && u.numero && u.bairro && u.cep && u.codigoMunicipio)
-}
+const SERVICE_TYPES: EligibleServiceType[] = ['call_center', 'royalties', 'marketing']
 
 const SERVICE_LABEL: Record<EligibleServiceType, string> = {
   call_center: 'Call Center',
@@ -51,27 +35,15 @@ const SERVICE_LABEL: Record<EligibleServiceType, string> = {
   marketing: 'Marketing',
 }
 
-const initialRows = (source: PendingEmissionRow[]): Record<string, RowState> =>
-  Object.fromEntries(
-    source.map((r) => [
-      r.id,
-      {
-        status: 'pendente',
-        items: [],
-        showNfse: false,
-        boletoFileName: null,
-        payment: 'a_pagar',
-        send: 'nao_enviado',
-        lastError: null,
-      } satisfies RowState,
-    ]),
-  )
+function hasDadoFiscalCompleto(u: LiveUnit): boolean {
+  return !!(u.cnpj && u.razaoSocial && u.logradouro && u.numero && u.bairro && u.cep && u.codigoMunicipio)
+}
 
-// Converte o resultado do parser (por aba/marca) na fila de emissão, usando o
-// `unitId` já resolvido pelo `UnitMatchModal` (correlação automática por nome
-// + ajuste manual do usuário) em vez de tentar casar nome de novo aqui.
-// Unidade "sem cobrança no mês" fica de fora da fila (seção 3 do MD) — ela já
-// apareceu no preview antes da confirmação, é só não virar fatura.
+// Converte o resultado do parser (por aba/marca) em linhas pra gravar na fila
+// real, usando o `unitId` já resolvido pelo `UnitMatchModal` (correlação
+// automática por nome + ajuste manual do usuário). Unidade "sem cobrança no
+// mês" fica de fora (seção 3 do MD) — já apareceu no preview, é só não virar
+// fatura.
 function toPendingRows(sheets: ParsedSheet[], matches: UnitMatches): PendingEmissionRow[] {
   return sheets.flatMap((sheet, sheetIdx) => {
     const marca = brandFromTenantName(sheet.tenantName)
@@ -94,34 +66,22 @@ function toPendingRows(sheets: ParsedSheet[], matches: UnitMatches): PendingEmis
   })
 }
 
-function servicesOf(row: PendingEmissionRow): Array<{ serviceType: EligibleServiceType; label: string; value: number }> {
-  return [
-    { serviceType: 'call_center', label: SERVICE_LABEL.call_center, value: row.callCenterValue },
-    { serviceType: 'royalties', label: SERVICE_LABEL.royalties, value: row.royaltiesValue },
-    { serviceType: 'marketing', label: SERVICE_LABEL.marketing, value: row.marketingValue },
-  ]
-}
-
-// Histórico de importação/fila são fictícios (import fake), mas a fila de
-// emissão abaixo usa valores fictícios "com cara de real" (ver
-// src/data/pendingEmissions.ts). Boleto é só upload manual — este MVP não
-// gera boleto/PIX de verdade (nem simulado). Ver TODO.md → "Inventário de
-// dados fixos/fictícios".
 export function Faturamento() {
-  // A fila começa vazia — só reflete o que foi de fato importado/preenchido
-  // pra competência atual (`confirmImport`/`confirmManualEntry`), nunca um
-  // exemplo fictício "fantasma" de outro mês (pedido do usuário, 2026-09-03).
-  const [pendingEmissions, setPendingEmissions] = useState<PendingEmissionRow[]>([])
-  const [rows, setRows] = useState<Record<string, RowState>>({})
+  const [invoiceRows, setInvoiceRows] = useState<LiveInvoiceRow[]>([])
+  const [loadingRows, setLoadingRows] = useState(true)
+  const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({})
+  const [sendingIds, setSendingIds] = useState<Set<string>>(new Set())
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   // Fluxo de importação em 2 passos: primeiro correlaciona cada linha da
   // planilha com uma unidade real (`matches` ainda undefined → mostra
   // UnitMatchModal); só depois de resolvido mostra o preview de confirmação.
   const [importFlow, setImportFlow] = useState<{ fileName: string; sheets: ParsedSheet[]; matches?: UnitMatches } | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [importNotice, setImportNotice] = useState<string | null>(null)
   const [competencia, setCompetencia] = useState(currentMonthValue())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [units, setUnits] = useState<LiveUnit[]>([])
-  const { serviceEligibility, sendChannel, emitterFor, emitterMapping } = useSettings()
+  const { serviceEligibility, sendChannel, emitterFor, emitterMapping, emitters } = useSettings()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -138,6 +98,35 @@ export function Faturamento() {
   }, [])
 
   const unitsById = useMemo(() => Object.fromEntries(units.map((u) => [u.id, u])), [units])
+  const emittersById = useMemo(() => Object.fromEntries(emitters.map((e) => [e.id, e])), [emitters])
+
+  async function reloadRows(comp: string = competencia) {
+    try {
+      const data = await fetchInvoiceRows(comp)
+      setInvoiceRows(data)
+    } catch (e) {
+      console.error('Falha ao carregar faturamento:', e instanceof Error ? e.message : e)
+    }
+  }
+
+  // Fila real, persistida (nf_forneria.invoices/invoice_items) — recarrega
+  // sempre que a competência muda. Nada mais vive só em memória do navegador
+  // (achado real testando emissão em produção: trocar de página zerava tudo).
+  useEffect(() => {
+    let cancelled = false
+    setLoadingRows(true)
+    fetchInvoiceRows(competencia)
+      .then((data) => {
+        if (!cancelled) setInvoiceRows(data)
+      })
+      .catch((e) => console.error('Falha ao carregar faturamento:', e instanceof Error ? e.message : e))
+      .finally(() => {
+        if (!cancelled) setLoadingRows(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [competencia])
 
   // "Preencher valores" é página própria agora (`/faturamento/preencher`,
   // mais espaço que modal pras 69 unidades) — ao confirmar lá, ela volta
@@ -163,20 +152,23 @@ export function Faturamento() {
   }
 
   function toggleSelectAll() {
-    setSelectedIds((prev) => (prev.size === pendingEmissions.length ? new Set() : new Set(pendingEmissions.map((r) => r.id))))
+    setSelectedIds((prev) => (prev.size === invoiceRows.length ? new Set() : new Set(invoiceRows.map((r) => r.id))))
   }
 
   // Exclusão em massa — pra limpar dados de teste rapidamente, sem
-  // depender de status (deixa apagar até já emitida/paga, é só a fila
-  // local desta competência, não desfaz nada real).
-  function deleteSelected() {
-    setPendingEmissions((prev) => prev.filter((r) => !selectedIds.has(r.id)))
-    setRows((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !selectedIds.has(id))))
+  // depender de status. Apaga de verdade (cascata apaga os invoice_items
+  // junto) — útil pra testes, mas não desfaz nenhuma nota já emitida de
+  // verdade na Focus (só o registro local).
+  async function deleteSelected() {
+    const ids = [...selectedIds]
     setSelectedIds(new Set())
+    await deleteInvoices(ids)
+    await reloadRows()
   }
 
   async function handleFileSelected(file: File) {
     setImportError(null)
+    setImportNotice(null)
     try {
       const buffer = await file.arrayBuffer()
       const sheets = parseSpreadsheet(buffer)
@@ -190,129 +182,148 @@ export function Faturamento() {
     }
   }
 
-  function confirmImport() {
+  async function confirmImport() {
     if (!importFlow?.matches) return
-    const newRows = toPendingRows(importFlow.sheets, importFlow.matches)
-    setPendingEmissions(newRows)
-    setRows(initialRows(newRows))
-    setSelectedIds(new Set())
+    const allRows = toPendingRows(importFlow.sheets, importFlow.matches)
+    const withUnit = allRows.filter((r) => r.unitId !== null) as Array<PendingEmissionRow & { unitId: string }>
+    await saveQueueRows(competencia, withUnit, importFlow.fileName)
+    const skipped = allRows.length - withUnit.length
+    setImportNotice(skipped > 0 ? `${skipped} unidade${skipped === 1 ? '' : 's'} não ${skipped === 1 ? 'entrou' : 'entraram'} na fila por falta de correspondência.` : null)
     setImportFlow(null)
+    setSelectedIds(new Set())
+    await reloadRows()
   }
 
   // Preenchimento manual (alternativa ao upload de planilha) — mesmo
-  // destino que `confirmImport`: substitui a fila de emissão.
-  function confirmManualEntry(newRows: PendingEmissionRow[], competenciaValue: string) {
-    setCompetencia(competenciaValue)
-    setPendingEmissions(newRows)
-    setRows(initialRows(newRows))
+  // destino que `confirmImport`.
+  async function confirmManualEntry(newRows: PendingEmissionRow[], competenciaValue: string) {
+    const withUnit = newRows.filter((r) => r.unitId !== null) as Array<PendingEmissionRow & { unitId: string }>
+    await saveQueueRows(competenciaValue, withUnit, null)
     setSelectedIds(new Set())
+    if (competenciaValue === competencia) {
+      await reloadRows()
+    } else {
+      setCompetencia(competenciaValue) // o useEffect acima recarrega sozinho
+    }
   }
 
   const statusCounts = (Object.keys(statusTag) as Array<keyof typeof statusTag>).map((status) => ({
     status,
-    count: mockInvoices.filter((inv) => inv.status === status).length,
+    count: invoiceRows.filter((r) => r.status === status).length,
   }))
 
-  const pendingCount = pendingEmissions.filter((r) => rows[r.id].status === 'pendente').length
+  const pendingCount = invoiceRows.filter((r) => r.status !== 'emitida').length
 
-  // Só entra na fila de emissão o serviço habilitado, com valor > 0 e que
-  // tenha um CNPJ emissor configurado em Configurações — sem CNPJ não dá
-  // pra saber quem emite a nota, então fica de fora (igual um serviço
-  // desabilitado).
-  function eligibleServices(row: PendingEmissionRow) {
-    return servicesOf(row).filter((s) => serviceEligibility[s.serviceType] && s.value > 0 && emitterFor(row.marca, s.serviceType))
+  // Só entra como elegível pra emitir o serviço habilitado, com item
+  // pendente/falho salvo (valor > 0 quando a fila foi gravada) e que tenha
+  // CNPJ emissor configurado — item já autorizado nunca reaparece aqui
+  // (não reemite nota já emitida).
+  function eligibleServices(row: LiveInvoiceRow) {
+    return SERVICE_TYPES.map((serviceType) => ({
+      serviceType,
+      label: SERVICE_LABEL[serviceType],
+      item: row.items.find((i) => i.serviceType === serviceType),
+    })).filter((s) => s.item && s.item.nfseStatus !== 'autorizada' && serviceEligibility[s.serviceType] && emitterFor(row.marca, s.serviceType))
+  }
+
+  function emitDisabledReason(row: LiveInvoiceRow): string | null {
+    const unit = unitsById[row.unitId]
+    if (!unit) return 'Unidade não encontrada no cadastro (Franquias) — não é possível emitir.'
+    if (!hasDadoFiscalCompleto(unit)) return 'Dado fiscal incompleto (CNPJ/endereço) — complete em Franquias antes de emitir.'
+    if (eligibleServices(row).length === 0) return 'Nenhum serviço elegível (verifique habilitação/CNPJ emissor em Configurações).'
+    return null
   }
 
   // Emissão real via Focus NFe (Ambiente Nacional, produção) — sempre 1 nota
   // por serviço elegível, nunca consolidada. Uma NFS-e tem um único código de
   // tributação/discriminação; "juntar" Royalties + Call Center numa nota só
   // produziria uma nota fiscalmente errada (decisão tomada com o usuário).
-  async function emitRow(row: PendingEmissionRow) {
-    if (rows[row.id].status !== 'pendente') return
+  // Cada resultado é gravado direto em `invoice_items` (não só em memória).
+  async function emitRow(row: LiveInvoiceRow) {
+    if (rowBusy[row.id]) return
     const eligible = eligibleServices(row)
     if (eligible.length === 0) return
+    const unit = unitsById[row.unitId]
+    if (!unit || !hasDadoFiscalCompleto(unit)) return
 
-    const unit = row.unitId ? unitsById[row.unitId] : null
-    if (!unit) {
-      setRows((prev) => ({
-        ...prev,
-        [row.id]: { ...prev[row.id], lastError: 'Unidade não encontrada no cadastro (Franquias) — não é possível emitir.' },
-      }))
-      return
-    }
-    if (!hasDadoFiscalCompleto(unit)) {
-      setRows((prev) => ({
-        ...prev,
-        [row.id]: { ...prev[row.id], lastError: 'Dado fiscal incompleto (CNPJ/endereço) — complete em Franquias antes de emitir.' },
-      }))
-      return
-    }
+    setRowBusy((prev) => ({ ...prev, [row.id]: true }))
 
-    setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], status: 'emitindo', lastError: null } }))
-
-    const outcomes = await Promise.allSettled(
-      eligible.map((s) =>
-        emitirNfseReal({
-          ambiente: 'producao',
-          ref: `${row.id}-${s.serviceType}-${competencia}`,
-          mapping: emitterMapping[emitterKey(row.marca, s.serviceType)] ?? EMPTY_MAPPING,
-          unit,
-          valor: s.value,
-          discriminacao: `${s.label} — ${row.unitName} — ${formatCompetencia(competencia)}`,
-        }),
-      ),
+    await Promise.allSettled(
+      eligible.map(async (s) => {
+        const itemId = s.item!.id
+        try {
+          const result = await emitirNfseReal({
+            ambiente: 'producao',
+            ref: `${row.unitId}-${s.serviceType}-${competencia}`,
+            mapping: emitterMapping[emitterKey(row.marca, s.serviceType)] ?? EMPTY_MAPPING,
+            unit,
+            valor: s.item!.value,
+            discriminacao: `${s.label} — ${row.unitName} — ${formatCompetencia(competencia)}`,
+          })
+          await recordEmissionResult(itemId, {
+            nfseStatus: 'autorizada',
+            nfseNumber: result.numero ?? null,
+            urlDanfse: result.url_danfse ?? null,
+            emitterId: emitterFor(row.marca, s.serviceType)?.id ?? null,
+          })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Falha desconhecida ao emitir.'
+          await recordEmissionResult(itemId, { nfseStatus: 'falha', errorMessage: msg })
+        }
+      }),
     )
 
-    const items: EmittedItem[] = []
-    const errors: string[] = []
-    outcomes.forEach((outcome, i) => {
-      const s = eligible[i]
-      if (outcome.status === 'fulfilled') {
-        items.push({
-          serviceType: s.serviceType,
-          label: s.label,
-          value: s.value,
-          nfseNumber: outcome.value.numero ?? null,
-          urlDanfse: outcome.value.url_danfse ?? null,
-          emitter: emitterFor(row.marca, s.serviceType),
-        })
-      } else {
-        const msg = outcome.reason instanceof Error ? outcome.reason.message : 'Falha desconhecida ao emitir.'
-        errors.push(`${s.label}: ${msg}`)
-      }
-    })
-
-    if (errors.length > 0) {
-      setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], status: 'pendente', lastError: errors.join(' · ') } }))
-      return
+    const refreshed = await fetchInvoiceRows(competencia)
+    const updatedRow = refreshed.find((r) => r.id === row.id)
+    if (updatedRow && updatedRow.items.length > 0 && updatedRow.items.every((i) => i.nfseStatus === 'autorizada') && updatedRow.status !== 'emitida') {
+      await updateInvoiceStatus(row.id, 'emitida')
+      updatedRow.status = 'emitida'
     }
-    setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], status: 'emitida', items, lastError: null } }))
+    setInvoiceRows(refreshed)
+    setRowBusy((prev) => {
+      const next = { ...prev }
+      delete next[row.id]
+      return next
+    })
   }
 
   async function emitLote() {
-    const pending = pendingEmissions.filter((r) => rows[r.id].status === 'pendente')
+    const pending = invoiceRows.filter((r) => r.status !== 'emitida' && emitDisabledReason(r) === null)
     await Promise.all(pending.map((row) => emitRow(row)))
   }
 
-  function handleBoletoChange(id: string, file: File | null) {
+  async function handleBoletoChange(row: LiveInvoiceRow, file: File | null) {
     if (!file) return
-    setRows((prev) => ({ ...prev, [id]: { ...prev[id], boletoFileName: file.name } }))
+    await updateInvoiceBoleto(row.id, file.name)
+    await reloadRows()
   }
 
   function toggleShowNfse(id: string) {
-    setRows((prev) => ({ ...prev, [id]: { ...prev[id], showNfse: !prev[id].showNfse } }))
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
-  function togglePayment(id: string) {
-    setRows((prev) => ({ ...prev, [id]: { ...prev[id], payment: prev[id].payment === 'pago' ? 'a_pagar' : 'pago' } }))
+  async function togglePayment(row: LiveInvoiceRow) {
+    await updateInvoicePayment(row.id, row.paymentStatus === 'paga' ? 'pendente' : 'paga')
+    await reloadRows()
   }
 
-  async function sendRow(row: PendingEmissionRow) {
-    if (rows[row.id].send !== 'nao_enviado') return
-    setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], send: 'enviando' } }))
+  async function sendRow(row: LiveInvoiceRow) {
+    if (row.whatsappSent || row.emailSent || sendingIds.has(row.id)) return
+    setSendingIds((prev) => new Set(prev).add(row.id))
     const dispatch = sendChannel === 'whatsapp' ? simulateWhatsappSend : simulateEmailSend
-    await dispatch({ unitId: row.id, unitName: row.unitName })
-    setRows((prev) => ({ ...prev, [row.id]: { ...prev[row.id], send: 'enviado' } }))
+    await dispatch({ unitId: row.unitId, unitName: row.unitName })
+    await markInvoiceSent(row.id, sendChannel)
+    setSendingIds((prev) => {
+      const next = new Set(prev)
+      next.delete(row.id)
+      return next
+    })
+    await reloadRows()
   }
 
   return (
@@ -352,6 +363,9 @@ export function Faturamento() {
       {importError && (
         <div className="mb-[18px] rounded-[11px] bg-red-soft p-3 text-[12.5px] font-semibold text-red">⚠ {importError}</div>
       )}
+      {importNotice && (
+        <div className="mb-[18px] rounded-[11px] bg-amber-soft p-3 text-[12.5px] font-semibold text-amber">⚠ {importNotice}</div>
+      )}
 
       {importFlow && !importFlow.matches && (
         <UnitMatchModal
@@ -374,7 +388,7 @@ export function Faturamento() {
               <Tag tone={statusTag[status].tone} label={statusTag[status].label} />
             </div>
             <div className="num text-[22px] text-navy">{count}</div>
-            <div className="text-[11px] text-faint">faturas · Jun/2026</div>
+            <div className="text-[11px] text-faint">faturas · {formatCompetencia(competencia)}</div>
           </div>
         ))}
       </section>
@@ -401,7 +415,9 @@ export function Faturamento() {
             </span>
           </div>
         </div>
-        {pendingEmissions.length === 0 ? (
+        {loadingRows ? (
+          <div className="px-5 py-16 text-center text-[12.5px] text-faint">Carregando…</div>
+        ) : invoiceRows.length === 0 ? (
           <div className="flex flex-col items-center gap-1 px-5 py-16 text-center">
             <p className="text-[13px] font-semibold text-navy">
               Nenhuma unidade preenchida ou importada pra {formatCompetencia(competencia)} ainda
@@ -416,7 +432,7 @@ export function Faturamento() {
                 <th className="w-[36px] border-y border-line bg-[#fafbfc] px-3 py-[11px]">
                   <input
                     type="checkbox"
-                    checked={pendingEmissions.length > 0 && selectedIds.size === pendingEmissions.length}
+                    checked={invoiceRows.length > 0 && selectedIds.size === invoiceRows.length}
                     onChange={toggleSelectAll}
                     className="h-[14px] w-[14px] accent-orange"
                   />
@@ -434,9 +450,14 @@ export function Faturamento() {
               </tr>
             </thead>
             <tbody>
-              {pendingEmissions.map((row) => {
-                const state = rows[row.id]
+              {invoiceRows.map((row) => {
                 const eligible = eligibleServices(row)
+                const disabledReason = emitDisabledReason(row)
+                const busy = !!rowBusy[row.id]
+                const sending = sendingIds.has(row.id)
+                const sent = row.whatsappSent || row.emailSent
+                const hasAutorizada = row.items.some((i) => i.nfseStatus === 'autorizada')
+                const hasFalha = row.items.some((i) => i.nfseStatus === 'falha')
                 return (
                   <tr key={row.id} className="border-b border-line last:border-none hover:bg-[#fafbfc]">
                     <td className="px-3 py-[13px]">
@@ -458,49 +479,49 @@ export function Faturamento() {
                       {formatBRL(row.marketingValue)}
                     </td>
                     <td className="px-5 py-[13px] text-right">
-                      <span className="font-display font-bold text-navy">{formatBRL(totalOf(row))}</span>
+                      <span className="font-display font-bold text-navy">{formatBRL(row.totalValue)}</span>
                     </td>
                     <td className="px-5 py-[13px]">
                       <div className="flex flex-col gap-1">
                         <div className="flex flex-nowrap items-center gap-[6px]">
                           <label
                             className="cursor-pointer whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
-                            title={state.boletoFileName ?? 'Anexar boleto (upload manual — este app não gera boleto)'}
+                            title={row.boletoFileName ?? 'Anexar boleto (upload manual — este app não gera boleto)'}
                           >
-                            {state.boletoFileName ? '📎 Boleto' : 'Boleto'}
+                            {row.boletoFileName ? '📎 Boleto' : 'Boleto'}
                             <input
                               type="file"
                               accept=".pdf,.png,.jpg,.jpeg"
                               className="hidden"
-                              onChange={(e) => handleBoletoChange(row.id, e.target.files?.[0] ?? null)}
+                              onChange={(e) => handleBoletoChange(row, e.target.files?.[0] ?? null)}
                             />
                           </label>
 
                           <button
-                            onClick={() => togglePayment(row.id)}
+                            onClick={() => togglePayment(row)}
                             className={`whitespace-nowrap rounded-[7px] px-[8px] py-[5px] text-[10.5px] font-bold ${
-                              state.payment === 'pago' ? 'bg-green-soft text-green' : 'bg-amber-soft text-amber'
+                              row.paymentStatus === 'paga' ? 'bg-green-soft text-green' : 'bg-amber-soft text-amber'
                             }`}
                           >
-                            {state.payment === 'pago' ? 'Pago ✓' : 'A pagar'}
+                            {row.paymentStatus === 'paga' ? 'Pago ✓' : 'A pagar'}
                           </button>
 
-                          {state.status === 'pendente' && (
-                            <button
-                              disabled={eligible.length === 0}
-                              onClick={() => emitRow(row)}
-                              title={eligible.length === 0 ? 'Nenhum serviço elegível (verifique habilitação e CNPJ emissor em Configurações)' : undefined}
-                              className="whitespace-nowrap rounded-[7px] bg-orange px-[8px] py-[5px] text-[10.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              {state.lastError ? 'Tentar de novo' : 'Emitir'}
-                            </button>
-                          )}
-                          {state.status === 'emitindo' && (
+                          {busy ? (
                             <span className="whitespace-nowrap rounded-[7px] bg-[#eef1f4] px-[8px] py-[5px] text-[10.5px] font-semibold text-faint">
                               Emitindo…
                             </span>
+                          ) : (
+                            <button
+                              disabled={disabledReason !== null}
+                              onClick={() => emitRow(row)}
+                              title={disabledReason ?? undefined}
+                              className="whitespace-nowrap rounded-[7px] bg-orange px-[8px] py-[5px] text-[10.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {hasFalha ? 'Tentar de novo' : eligible.length === 0 && hasAutorizada ? 'Emitida' : 'Emitir'}
+                            </button>
                           )}
-                          {state.status === 'emitida' && (
+
+                          {hasAutorizada && (
                             <button
                               onClick={() => toggleShowNfse(row.id)}
                               className="whitespace-nowrap rounded-[7px] bg-green-soft px-[8px] py-[5px] text-[10.5px] font-bold text-green"
@@ -509,7 +530,15 @@ export function Faturamento() {
                             </button>
                           )}
 
-                          {state.send === 'nao_enviado' && (
+                          {sent ? (
+                            <span className="whitespace-nowrap rounded-[7px] bg-blue-soft px-[8px] py-[5px] text-[10.5px] font-bold text-blue">
+                              Enviado ✓
+                            </span>
+                          ) : sending ? (
+                            <span className="whitespace-nowrap rounded-[7px] bg-[#eef1f4] px-[8px] py-[5px] text-[10.5px] font-semibold text-faint">
+                              Enviando…
+                            </span>
+                          ) : (
                             <button
                               onClick={() => sendRow(row)}
                               className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
@@ -517,45 +546,45 @@ export function Faturamento() {
                               Enviar
                             </button>
                           )}
-                          {state.send === 'enviando' && (
-                            <span className="whitespace-nowrap rounded-[7px] bg-[#eef1f4] px-[8px] py-[5px] text-[10.5px] font-semibold text-faint">
-                              Enviando…
-                            </span>
-                          )}
-                          {state.send === 'enviado' && (
-                            <span className="whitespace-nowrap rounded-[7px] bg-blue-soft px-[8px] py-[5px] text-[10.5px] font-bold text-blue">
-                              Enviado ✓
-                            </span>
-                          )}
                         </div>
 
-                        {state.lastError && <div className="max-w-[260px] text-[10.5px] font-semibold text-red">⚠ {state.lastError}</div>}
+                        {hasFalha && (
+                          <div className="max-w-[260px] text-[10.5px] font-semibold text-red">
+                            ⚠{' '}
+                            {row.items
+                              .filter((i) => i.nfseStatus === 'falha' && i.errorMessage)
+                              .map((i) => `${SERVICE_LABEL[i.serviceType]}: ${i.errorMessage}`)
+                              .join(' · ')}
+                          </div>
+                        )}
 
-                        {state.status === 'emitida' && state.showNfse && (
+                        {expandedIds.has(row.id) && row.items.length > 0 && (
                           <div className="flex flex-col gap-1 pl-0.5">
-                            {state.items.map((it) => (
-                              <div key={it.serviceType}>
-                                <span className="font-display text-[10.5px] font-bold text-navy">
-                                  <span className="font-sans font-medium text-faint">{it.label}: </span>
-                                  {it.nfseNumber ?? 'processando…'}
-                                </span>
-                                {it.urlDanfse && (
-                                  <a
-                                    href={it.urlDanfse}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="ml-1 text-[10px] font-bold text-orange underline"
-                                  >
-                                    Ver DANFSe
-                                  </a>
-                                )}
-                                {it.emitter && (
-                                  <div className="text-[10px] text-faint">
-                                    {it.emitter.razaoSocial} · {it.emitter.cnpj}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                            {row.items
+                              .filter((it) => it.nfseStatus === 'autorizada')
+                              .map((it) => (
+                                <div key={it.id}>
+                                  <span className="font-display text-[10.5px] font-bold text-navy">
+                                    <span className="font-sans font-medium text-faint">{SERVICE_LABEL[it.serviceType]}: </span>
+                                    {it.nfseNumber ?? 'processando…'}
+                                  </span>
+                                  {it.urlDanfse && (
+                                    <a
+                                      href={it.urlDanfse}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="ml-1 text-[10px] font-bold text-orange underline"
+                                    >
+                                      Ver DANFSe
+                                    </a>
+                                  )}
+                                  {it.emitterId && emittersById[it.emitterId] && (
+                                    <div className="text-[10px] text-faint">
+                                      {emittersById[it.emitterId].razaoSocial} · {emittersById[it.emitterId].cnpj}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                           </div>
                         )}
                       </div>

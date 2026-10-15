@@ -1,14 +1,14 @@
 import type { Brand } from '@/types'
 
-// Fila de emissão da competência: candidatos a `invoice_item` (seção 3 do MD
-// v2) que ainda não viraram fatura/NFS-e. Populada em tempo real — via
-// importação de planilha (`toPendingRows` em `Faturamento.tsx`) ou
-// preenchimento manual (`PreencherValores.tsx`) — nunca por um fixture
-// fictício (ver TODO.md → "Inventário de dados fixos/fictícios").
+// Linha "de entrada" pra fila de emissão: formato comum entre importação de
+// planilha (`toPendingRows` em `Faturamento.tsx`) e preenchimento manual
+// (`PreencherValores.tsx`) antes de virar `invoice`/`invoice_item` de
+// verdade via `saveQueueRows` (`lib/liveInvoices.ts`) — a fila em si vive no
+// banco (nf_forneria.invoices/invoice_items), não aqui.
 //
 // `unitId` é o id real da unidade em `nf_forneria.units` (Supabase), quando
 // dá pra casar o nome da linha com uma unidade cadastrada — sem isso não dá
-// pra emitir de verdade (não tem CNPJ/endereço fiscal pra mandar pra Focus).
+// pra gravar fatura nenhuma (unit_id é obrigatório na tabela).
 export interface PendingEmissionRow {
   id: string
   unitId: string | null
@@ -17,8 +17,4 @@ export interface PendingEmissionRow {
   callCenterValue: number
   royaltiesValue: number
   marketingValue: number
-}
-
-export function totalOf(row: PendingEmissionRow): number {
-  return row.callCenterValue + row.royaltiesValue + row.marketingValue
 }
