@@ -52,6 +52,15 @@ export const ConfigIcon = (p: IconProps) => (
   </svg>
 )
 
+export const UsuariosIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <circle cx="9" cy="8" r="3.5" />
+    <path d="M2.5 20c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5" />
+    <circle cx="17.5" cy="8.5" r="2.7" />
+    <path d="M15.5 13.6c2.9.5 5 2.8 5 6.4" />
+  </svg>
+)
+
 export const UploadIcon = (p: IconProps) => (
   <svg {...base} {...p}>
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

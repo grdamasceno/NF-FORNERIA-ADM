@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { ConfigIcon, FaturamentoIcon, FranquiasIcon, PainelIcon, RelatoriosIcon } from '@/components/icons'
+import { ConfigIcon, FaturamentoIcon, FranquiasIcon, PainelIcon, RelatoriosIcon, UsuariosIcon } from '@/components/icons'
 import { activeFranchiseCount } from '@/data/units'
 import { useAuth } from '@/context/AuthContext'
 import logoOnChannel from '@/assets/logo-onchannel.jpeg'
@@ -76,6 +76,9 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
         </NavLink>
         <NavLink to="/configuracoes" className={linkClass} title={collapsed ? 'Configurações' : undefined}>
           <ConfigIcon className={iconClass} /> {!collapsed && 'Configurações'}
+        </NavLink>
+        <NavLink to="/usuarios" className={linkClass} title={collapsed ? 'Usuários' : undefined}>
+          <UsuariosIcon className={iconClass} /> {!collapsed && 'Usuários'}
         </NavLink>
       </nav>
 

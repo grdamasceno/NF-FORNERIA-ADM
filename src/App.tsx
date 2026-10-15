@@ -10,6 +10,7 @@ import { PreencherValores } from '@/pages/PreencherValores'
 import { PreencherPublico } from '@/pages/PreencherPublico'
 import { Relatorios } from '@/pages/Relatorios'
 import { Configuracoes } from '@/pages/Configuracoes'
+import { Usuarios } from '@/pages/Usuarios'
 
 // A partir da migration 0007, o app exige sessão real (Supabase Auth) —
 // sem ela, RLS bloqueia praticamente tudo. `Gate` decide entre spinner,
@@ -35,6 +36,7 @@ function Gate() {
           <Route path="faturamento/preencher" element={<PreencherValores />} />
           <Route path="relatorios" element={<Relatorios />} />
           <Route path="configuracoes" element={<Configuracoes />} />
+          <Route path="usuarios" element={<Usuarios />} />
         </Route>
       </Routes>
     </SettingsProvider>
