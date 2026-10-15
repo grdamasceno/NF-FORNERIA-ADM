@@ -8,6 +8,7 @@ import { Franquias } from '@/pages/Franquias'
 import { Faturamento } from '@/pages/Faturamento'
 import { PreencherValores } from '@/pages/PreencherValores'
 import { PreencherPublico } from '@/pages/PreencherPublico'
+import { RedefinirSenha } from '@/pages/RedefinirSenha'
 import { Relatorios } from '@/pages/Relatorios'
 import { Configuracoes } from '@/pages/Configuracoes'
 import { Usuarios } from '@/pages/Usuarios'
@@ -50,6 +51,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/preencher-publico/:token" element={<PreencherPublico />} />
+      <Route path="/redefinir-senha" element={<RedefinirSenha />} />
       <Route
         path="*"
         element={
