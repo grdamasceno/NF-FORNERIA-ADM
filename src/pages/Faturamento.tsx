@@ -208,10 +208,18 @@ export function Faturamento() {
     }
   }
 
-  const statusCounts = (Object.keys(statusTag) as Array<keyof typeof statusTag>).map((status) => ({
-    status,
-    count: invoiceRows.filter((r) => r.status === status).length,
-  }))
+  // Cada card conta uma dimensão independente — uma fatura pode ser Emitida
+  // + Paga + Enviada ao mesmo tempo, não é "o último status que aconteceu"
+  // (status sozinho não dava conta disso: marcar como enviada sobrescrevia
+  // o fato de já estar emitida).
+  const statusCounts: Array<{ status: keyof typeof statusTag; count: number }> = [
+    { status: 'paga', count: invoiceRows.filter((r) => r.paymentStatus === 'paga').length },
+    { status: 'enviada', count: invoiceRows.filter((r) => r.whatsappSent || r.emailSent).length },
+    { status: 'emitida', count: invoiceRows.filter((r) => r.status === 'emitida').length },
+    { status: 'pendente_emissao', count: invoiceRows.filter((r) => r.status === 'pendente_emissao').length },
+    { status: 'atraso', count: invoiceRows.filter((r) => r.paymentStatus === 'atraso').length },
+    { status: 'falha', count: invoiceRows.filter((r) => r.items.some((i) => i.nfseStatus === 'falha')).length },
+  ]
 
   const pendingCount = invoiceRows.filter((r) => r.status !== 'emitida').length
 

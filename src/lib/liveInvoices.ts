@@ -259,11 +259,15 @@ export async function updateInvoiceBoleto(invoiceId: string, fileName: string): 
   if (error) throw error
 }
 
+// Não mexe em `status` — isso fica só pro ciclo de emissão (ver
+// `updateInvoiceStatus`). "Enviado" é uma dimensão independente
+// (whatsapp_sent/email_sent), senão marcar como enviado apagava o fato de já
+// estar emitida (campo único sobrescrito) — achado real no Painel/Faturamento.
 export async function markInvoiceSent(invoiceId: string, channel: 'whatsapp' | 'email'): Promise<void> {
   const field = channel === 'whatsapp' ? 'whatsapp_sent' : 'email_sent'
   const { error } = await supabase
     .from('invoices')
-    .update({ [field]: true, status: 'enviada' })
+    .update({ [field]: true })
     .eq('id', invoiceId)
   if (error) throw error
 }
