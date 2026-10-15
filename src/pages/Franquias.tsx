@@ -136,7 +136,12 @@ export function Franquias() {
                     >
                       {initials(u.name)}
                     </div>
-                    <b className="block text-[13px] font-semibold leading-[1.25] text-navy">{u.name}</b>
+                    <div className="min-w-0">
+                      <b className="block truncate text-[13px] font-semibold leading-[1.25] text-navy">{u.name}</b>
+                      <span className="block truncate text-[11px] text-faint" title={u.razaoSocial ?? undefined}>
+                        {u.razaoSocial ?? 'Razão social não cadastrada'}
+                      </span>
+                    </div>
                   </div>
                 </td>
                 <td className="px-5 py-[13px] align-middle">
