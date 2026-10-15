@@ -26,6 +26,27 @@ export interface EmitirNfseResult {
 
 export class EmitirNfseError extends Error {}
 
+// Formato real dos erros da Focus varia (string solta, `{ codigo, mensagem }`,
+// ou só `mensagem` no corpo) — junta o que tiver em vez de assumir uma forma só.
+function describeFocusError(body: EmitirNfseResult | null): string {
+  if (Array.isArray(body?.erros) && body!.erros.length > 0) {
+    const parts = (body!.erros as unknown[]).map((e) => {
+      if (typeof e === 'string') return e
+      if (e && typeof e === 'object') {
+        const o = e as { mensagem?: string; codigo?: string }
+        return o.mensagem ?? o.codigo ?? JSON.stringify(e)
+      }
+      return String(e)
+    })
+    return parts.filter(Boolean).join(' · ')
+  }
+  if (body?.mensagem) return body.mensagem
+  if (body?.status === 'processando_autorizacao') {
+    return 'A Focus ainda está processando essa nota (não autorizou nem rejeitou a tempo) — tente de novo em alguns instantes.'
+  }
+  return `Focus NFe retornou status "${body?.status ?? 'desconhecido'}" — não é uma emissão autorizada.`
+}
+
 export async function emitirNfseReal(params: EmitirServicoParams): Promise<EmitirNfseResult> {
   const { ambiente, ref, mapping, unit, valor, discriminacao } = params
   if (!mapping.emitterId) {
@@ -78,8 +99,12 @@ export async function emitirNfseReal(params: EmitirServicoParams): Promise<Emiti
     const msg = body?.body?.mensagem ?? body?.message ?? body?.error ?? `Falha ao emitir NFS-e (HTTP ${resp.status}).`
     throw new EmitirNfseError(String(msg))
   }
-  if (body?.status === 'erro_autorizacao' || body?.status === 'erro') {
-    throw new EmitirNfseError(body?.mensagem ?? 'Focus NFe rejeitou a emissão — ver detalhes no painel da Focus.')
+  // Só "autorizado" é sucesso de verdade. `processando_autorizacao` não é
+  // terminal (achado real: ficava marcado como emitido no banco mesmo sem a
+  // Focus ter autorizado — a nota virou ERRO no painel deles) e
+  // erro/erro_autorizacao/cancelado óbvio que não são.
+  if (body?.status !== 'autorizado') {
+    throw new EmitirNfseError(describeFocusError(body))
   }
-  return body ?? { status: 'processando_autorizacao' }
+  return body
 }
