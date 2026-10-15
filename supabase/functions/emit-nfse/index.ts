@@ -92,6 +92,26 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'method_not_allowed', message: 'Use POST.' }, 405)
   }
 
+  // Esta função dispara emissão fiscal real (produção) — nunca pode ficar
+  // chamável sem autenticação. Mesmo padrão do upload-certificado: valida o
+  // usuário logado via Auth e confirma que ele é admin/superadmin da mesma
+  // organização do emissor antes de prosseguir.
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader) return jsonResponse({ error: 'unauthorized' }, 401)
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!supabaseUrl || !serviceRoleKey) {
+    return jsonResponse({ error: 'server_misconfigured', message: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configuradas na função.' }, 500)
+  }
+
+  const userResp = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { Authorization: authHeader, apikey: serviceRoleKey },
+  })
+  if (!userResp.ok) return jsonResponse({ error: 'unauthorized' }, 401)
+  const authUser = (await userResp.json()) as { id?: string }
+  if (!authUser.id) return jsonResponse({ error: 'unauthorized' }, 401)
+
   let body: EmitirBody
   try {
     body = await req.json()
@@ -107,21 +127,23 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'invalid_ambiente', message: 'ambiente deve ser "homologacao" ou "producao".' }, 400)
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  if (!supabaseUrl || !serviceRoleKey) {
-    return jsonResponse({ error: 'server_misconfigured', message: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configuradas na função.' }, 500)
-  }
   const supabase = createClient(supabaseUrl, serviceRoleKey, { db: { schema: 'nf_forneria' } })
+
+  const { data: profile } = await supabase.from('profiles').select('role, organization_id').eq('id', authUser.id).single()
+  if (!profile) return jsonResponse({ error: 'forbidden' }, 403)
 
   const { data: emitter, error: emitterError } = await supabase
     .from('emitters')
-    .select('id, razao_social, cnpj, inscricao_municipal, codigo_municipio, optante_simples_nacional, regime_especial_tributacao')
+    .select('id, organization_id, razao_social, cnpj, inscricao_municipal, codigo_municipio, optante_simples_nacional, regime_especial_tributacao')
     .eq('id', emitterId)
     .single()
   if (emitterError || !emitter) {
     return jsonResponse({ error: 'emitter_not_found', message: emitterError?.message ?? 'Emissor não encontrado.' }, 404)
   }
+
+  const isSuper = profile.role === 'superadmin'
+  if (!isSuper && profile.role !== 'admin') return jsonResponse({ error: 'forbidden' }, 403)
+  if (!isSuper && profile.organization_id !== emitter.organization_id) return jsonResponse({ error: 'forbidden' }, 403)
   if (!emitter.inscricao_municipal || !emitter.codigo_municipio) {
     return jsonResponse(
       {

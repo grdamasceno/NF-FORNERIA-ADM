@@ -1,3 +1,12 @@
+import type { Brand } from '@/types'
+
+// Nome da aba da planilha -> marca do cadastro. Usado tanto pra montar a fila
+// de emissão (`toPendingRows`) quanto pro modal de correlação de unidades
+// (`UnitMatchModal`) — os dois precisam concordar em qual marca cada aba é.
+export function brandFromTenantName(tenantName: string): Brand {
+  return tenantName.trim().toLowerCase() === 'the duck' ? 'The Duck' : 'Forneria'
+}
+
 // "2026-09" -> "2026-09" (formato do <input type="month">) e "Setembro / 2026"
 // (formato de exibição já usado no resto da tela de Faturamento).
 export function currentMonthValue(): string {

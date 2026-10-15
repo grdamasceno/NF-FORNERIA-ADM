@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { currentMonthValue, slugify } from '@/lib/format'
-import { franchiseUnits, franchiseBrands } from '@/data/units'
+import { fetchUnits } from '@/lib/liveUnits'
 import type { PendingEmissionRow } from '@/data/pendingEmissions'
-import type { Brand } from '@/types'
+import type { Brand, LiveUnit } from '@/types'
 
 type BrandFilter = Brand | 'todas'
 
@@ -21,43 +21,71 @@ function parseValue(text: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
+function hasDadoFiscalCompleto(u: LiveUnit): boolean {
+  return !!(u.cnpj && u.razaoSocial && u.logradouro && u.numero && u.bairro && u.cep && u.codigoMunicipio)
+}
+
 // Preenchimento manual dos valores do mês, página própria (em vez de modal)
 // pra caber as 69 unidades com mais espaço. Alternativa ao upload de
 // planilha — mesmo destino (`PendingEmissionRow[]`) e mesma regra de "sem
 // cobrança fica de fora da fila" que `toPendingRows` usa no caminho de
-// importação de arquivo. Ao confirmar, volta pra Faturamento levando o
-// resultado via `navigate(..., { state })`, que lá vira a fila de emissão
-// (ver `Faturamento.tsx` → efeito que lê `location.state`).
+// importação de arquivo. Usa as unidades REAIS do Supabase (não mais o
+// fixture `franquias.json`) — é o `id` real daqui que a emissão de verdade
+// usa pra buscar CNPJ/endereço fiscal da unidade. Ao confirmar, volta pra
+// Faturamento levando o resultado via `navigate(..., { state })`.
 export function PreencherValores() {
   const navigate = useNavigate()
+  const [units, setUnits] = useState<LiveUnit[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [competencia, setCompetencia] = useState(currentMonthValue())
   const [brandFilter, setBrandFilter] = useState<BrandFilter>('todas')
   const [values, setValues] = useState<Record<string, RowInput>>({})
 
+  useEffect(() => {
+    let cancelled = false
+    fetchUnits()
+      .then((data) => {
+        if (!cancelled) setUnits(data)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Falha ao carregar unidades.')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const brands = useMemo(() => Array.from(new Set(units.map((u) => u.marca))).sort(), [units])
+
   const visibleUnits = useMemo(
-    () => franchiseUnits.filter((u) => u.ativo && (brandFilter === 'todas' || u.marca === brandFilter)),
-    [brandFilter],
+    () => units.filter((u) => u.active && (brandFilter === 'todas' || u.marca === brandFilter)),
+    [units, brandFilter],
   )
 
   function setField(unitId: string, field: keyof RowInput, text: string) {
     setValues((prev) => ({ ...prev, [unitId]: { ...(prev[unitId] ?? EMPTY_INPUT), [field]: text } }))
   }
 
-  const filledCount = franchiseUnits.filter((u) => {
+  const filledCount = units.filter((u) => {
     const v = values[u.id]
     return v && (parseValue(v.callCenter) > 0 || parseValue(v.royalties) > 0 || parseValue(v.marketing) > 0)
   }).length
 
   function handleConfirm() {
-    const rows: PendingEmissionRow[] = franchiseUnits
+    const rows: PendingEmissionRow[] = units
       .map((u) => {
         const v = values[u.id] ?? EMPTY_INPUT
         const callCenterValue = parseValue(v.callCenter)
         const royaltiesValue = parseValue(v.royalties)
         const marketingValue = parseValue(v.marketing)
         return {
-          id: `${slugify(u.marca)}-${slugify(u.nome)}`,
-          unitName: `${u.marca} ${u.nome}`,
+          id: `${slugify(u.marca)}-${slugify(u.name)}`,
+          unitId: u.id,
+          unitName: `${u.marca} ${u.name}`,
           marca: u.marca,
           callCenterValue,
           royaltiesValue,
@@ -70,7 +98,10 @@ export function PreencherValores() {
 
   return (
     <>
-      <PageHeader title="Preencher valores do mês" subtitle="Lança Call Center, Royalties e Marketing por unidade — vira a fila de emissão, igual importar planilha.">
+      <PageHeader
+        title="Preencher valores do mês"
+        subtitle="Lança Call Center, Royalties e Marketing por unidade — vira a fila de emissão, igual importar planilha."
+      >
         <label className="flex flex-col gap-1">
           <span className="text-[10px] font-bold uppercase tracking-[.05em] text-faint">Competência</span>
           <input
@@ -92,9 +123,11 @@ export function PreencherValores() {
         </button>
       </PageHeader>
 
+      {error && <div className="mb-4 rounded-[11px] bg-red-soft p-3 text-[12.5px] font-semibold text-red">{error}</div>}
+
       <div className="mb-4 flex gap-2">
         <BrandFilterTab label="Todas as marcas" active={brandFilter === 'todas'} onClick={() => setBrandFilter('todas')} />
-        {franchiseBrands.map((b) => (
+        {brands.map((b) => (
           <BrandFilterTab key={b} label={b} active={brandFilter === b} onClick={() => setBrandFilter(b)} />
         ))}
       </div>
@@ -104,11 +137,11 @@ export function PreencherValores() {
           <table className="w-full border-collapse">
             <thead>
               <tr>
-                {['Unidade', 'Marca', 'Call Center', 'Royalties', 'Marketing'].map((h, i) => (
+                {['Unidade', 'Marca', 'Dado fiscal', 'Call Center', 'Royalties', 'Marketing'].map((h, i) => (
                   <th
                     key={h}
                     className={`border border-line bg-[#fafbfc] px-5 py-[11px] text-left text-[10.5px] font-bold uppercase tracking-[.06em] text-faint ${
-                      i >= 2 ? 'text-right' : ''
+                      i >= 3 ? 'text-right' : ''
                     }`}
                   >
                     {h}
@@ -117,24 +150,39 @@ export function PreencherValores() {
               </tr>
             </thead>
             <tbody>
-              {visibleUnits.map((u) => {
-                const v = values[u.id] ?? EMPTY_INPUT
-                return (
-                  <tr key={u.id} className="hover:bg-[#fafbfc]">
-                    <td className="border border-line px-5 py-[7px] text-[13px] font-semibold text-navy">{u.nome}</td>
-                    <td className="border border-line px-5 py-[7px] text-[11.5px] text-faint">{u.marca}</td>
-                    <td className="border border-line p-0">
-                      <ValueInput value={v.callCenter} onChange={(t) => setField(u.id, 'callCenter', t)} />
-                    </td>
-                    <td className="border border-line p-0">
-                      <ValueInput value={v.royalties} onChange={(t) => setField(u.id, 'royalties', t)} />
-                    </td>
-                    <td className="border border-line p-0">
-                      <ValueInput value={v.marketing} onChange={(t) => setField(u.id, 'marketing', t)} />
-                    </td>
-                  </tr>
-                )
-              })}
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="border border-line px-5 py-10 text-center text-[12.5px] text-faint">
+                    Carregando…
+                  </td>
+                </tr>
+              ) : (
+                visibleUnits.map((u) => {
+                  const v = values[u.id] ?? EMPTY_INPUT
+                  const completo = hasDadoFiscalCompleto(u)
+                  return (
+                    <tr key={u.id} className="hover:bg-[#fafbfc]">
+                      <td className="border border-line px-5 py-[7px] text-[13px] font-semibold text-navy">{u.name}</td>
+                      <td className="border border-line px-5 py-[7px] text-[11.5px] text-faint">{u.marca}</td>
+                      <td className="border border-line px-5 py-[7px] text-center">
+                        <span
+                          title={completo ? 'CNPJ e endereço cadastrados' : 'Falta CNPJ/endereço — edite em Franquias'}
+                          className={`inline-block h-[8px] w-[8px] rounded-full ${completo ? 'bg-green' : 'bg-faint'}`}
+                        />
+                      </td>
+                      <td className="border border-line p-0">
+                        <ValueInput value={v.callCenter} onChange={(t) => setField(u.id, 'callCenter', t)} />
+                      </td>
+                      <td className="border border-line p-0">
+                        <ValueInput value={v.royalties} onChange={(t) => setField(u.id, 'royalties', t)} />
+                      </td>
+                      <td className="border border-line p-0">
+                        <ValueInput value={v.marketing} onChange={(t) => setField(u.id, 'marketing', t)} />
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
             </tbody>
           </table>
         </div>
