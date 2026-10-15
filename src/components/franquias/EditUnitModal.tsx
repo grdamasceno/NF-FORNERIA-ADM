@@ -1,11 +1,33 @@
 import { useState } from 'react'
-import type { LiveUnit } from '@/types'
-import { updateUnit, type UnitEditableFields } from '@/lib/liveUnits'
+import type { Brand, LiveUnit } from '@/types'
+import { insertUnit, updateUnit, type UnitEditableFields } from '@/lib/liveUnits'
 
 interface EditUnitModalProps {
-  unit: LiveUnit
+  // Ausente = modo "criar" — pede a marca (não dá pra editar depois daqui,
+  // só mudando o tenant direto no banco) e grava via `insertUnit`.
+  unit?: LiveUnit
+  marcas: Brand[]
   onClose: () => void
   onSaved: (unit: LiveUnit) => void
+}
+
+const EMPTY_FORM: UnitEditableFields = {
+  name: '',
+  razaoSocial: '',
+  cnpj: '',
+  active: true,
+  cidade: '',
+  estado: '',
+  uf: '',
+  endereco: '',
+  logradouro: '',
+  numero: '',
+  bairro: '',
+  cep: '',
+  codigoMunicipio: '',
+  telefone: '',
+  email: '',
+  horario: '',
 }
 
 const UF_TO_ESTADO: Record<string, string> = {
@@ -52,25 +74,30 @@ interface ViaCepResponse {
 // tomador da NFS-e (ver seção 8 do MD / integração Focus NFe). CEP dispara
 // busca automática (ViaCEP) que já preenche logradouro/bairro/cidade/UF/
 // código do município — o usuário só confirma e completa o número.
-export function EditUnitModal({ unit, onClose, onSaved }: EditUnitModalProps) {
-  const [form, setForm] = useState<UnitEditableFields>({
-    name: unit.name,
-    razaoSocial: unit.razaoSocial ?? '',
-    cnpj: unit.cnpj ?? '',
-    active: unit.active,
-    cidade: unit.cidade ?? '',
-    estado: unit.estado ?? '',
-    uf: unit.uf ?? '',
-    endereco: unit.endereco ?? '',
-    logradouro: unit.logradouro ?? '',
-    numero: unit.numero ?? '',
-    bairro: unit.bairro ?? '',
-    cep: unit.cep ?? '',
-    codigoMunicipio: unit.codigoMunicipio ?? '',
-    telefone: unit.telefone ?? '',
-    email: unit.email ?? '',
-    horario: unit.horario ?? '',
-  })
+export function EditUnitModal({ unit, marcas, onClose, onSaved }: EditUnitModalProps) {
+  const [form, setForm] = useState<UnitEditableFields>(
+    unit
+      ? {
+          name: unit.name,
+          razaoSocial: unit.razaoSocial ?? '',
+          cnpj: unit.cnpj ?? '',
+          active: unit.active,
+          cidade: unit.cidade ?? '',
+          estado: unit.estado ?? '',
+          uf: unit.uf ?? '',
+          endereco: unit.endereco ?? '',
+          logradouro: unit.logradouro ?? '',
+          numero: unit.numero ?? '',
+          bairro: unit.bairro ?? '',
+          cep: unit.cep ?? '',
+          codigoMunicipio: unit.codigoMunicipio ?? '',
+          telefone: unit.telefone ?? '',
+          email: unit.email ?? '',
+          horario: unit.horario ?? '',
+        }
+      : EMPTY_FORM,
+  )
+  const [marca, setMarca] = useState<Brand>(unit?.marca ?? marcas[0])
   const [saving, setSaving] = useState(false)
   const [cepLoading, setCepLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -106,11 +133,16 @@ export function EditUnitModal({ unit, onClose, onSaved }: EditUnitModalProps) {
   }
 
   async function handleSave() {
+    if (!form.name.trim()) {
+      setError('Nome é obrigatório.')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
       const normalized: UnitEditableFields = {
         ...form,
+        name: form.name.trim(),
         razaoSocial: form.razaoSocial?.trim() || null,
         cnpj: form.cnpj?.trim() || null,
         cidade: form.cidade?.trim() || null,
@@ -126,8 +158,13 @@ export function EditUnitModal({ unit, onClose, onSaved }: EditUnitModalProps) {
         email: form.email?.trim() || null,
         horario: form.horario?.trim() || null,
       }
-      await updateUnit(unit.id, normalized)
-      onSaved({ ...unit, ...normalized })
+      if (unit) {
+        await updateUnit(unit.id, normalized)
+        onSaved({ ...unit, ...normalized })
+      } else {
+        const created = await insertUnit(marca, normalized)
+        onSaved(created)
+      }
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao salvar.')
@@ -143,8 +180,22 @@ export function EditUnitModal({ unit, onClose, onSaved }: EditUnitModalProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-[15px] font-bold text-navy">Editar {unit.name}</h3>
-          <span className="rounded-[7px] bg-[#eef1f4] px-2 py-1 text-[11px] font-bold text-faint">{unit.marca}</span>
+          <h3 className="text-[15px] font-bold text-navy">{unit ? `Editar ${unit.name}` : 'Nova unidade'}</h3>
+          {unit ? (
+            <span className="rounded-[7px] bg-[#eef1f4] px-2 py-1 text-[11px] font-bold text-faint">{unit.marca}</span>
+          ) : (
+            <select
+              value={marca}
+              onChange={(e) => setMarca(e.target.value as Brand)}
+              className="rounded-[7px] border border-line bg-white px-2 py-1 text-[11px] font-bold text-navy focus:outline-none focus:ring-1 focus:ring-orange-soft"
+            >
+              {marcas.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="flex flex-col gap-2">
@@ -208,7 +259,7 @@ export function EditUnitModal({ unit, onClose, onSaved }: EditUnitModalProps) {
               disabled={saving}
               className="rounded-[9px] bg-orange px-4 py-[8px] text-[12px] font-bold text-white disabled:opacity-50"
             >
-              {saving ? 'Salvando…' : 'Salvar'}
+              {saving ? 'Salvando…' : unit ? 'Salvar' : 'Criar unidade'}
             </button>
           </div>
         </div>

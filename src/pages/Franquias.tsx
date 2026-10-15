@@ -8,6 +8,10 @@ import type { Brand, LiveUnit } from '@/types'
 
 type BrandFilter = Brand | 'todas'
 
+// Cadastro de marca nova ainda não existe (ver TODO.md) — por enquanto só
+// essas duas, fixas, pro seletor de "Nova unidade".
+const ALL_BRANDS: Brand[] = ['Forneria', 'The Duck']
+
 // Única tela ligada de verdade ao Supabase (`nf_forneria.units`) — as
 // outras (Sidebar, Configurações) ainda usam o `franquias.json` estático.
 // Ver TODO.md → "Inventário de dados fixos/fictícios".
@@ -19,6 +23,7 @@ export function Franquias() {
   const [uf, setUf] = useState<string>('todos')
   const [marca, setMarca] = useState<BrandFilter>('todas')
   const [editing, setEditing] = useState<LiveUnit | null>(null)
+  const [creating, setCreating] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -77,6 +82,12 @@ export function Franquias() {
             </option>
           ))}
         </select>
+        <button
+          onClick={() => setCreating(true)}
+          className="inline-flex items-center gap-2 rounded-[11px] bg-orange px-[15px] py-[10px] text-[12.5px] font-bold text-white shadow-[0_6px_14px_rgba(233,78,27,.28)]"
+        >
+          + Nova unidade
+        </button>
       </PageHeader>
 
       {error && (
@@ -166,8 +177,17 @@ export function Franquias() {
       {editing && (
         <EditUnitModal
           unit={editing}
+          marcas={ALL_BRANDS}
           onClose={() => setEditing(null)}
           onSaved={(updated) => setUnits((prev) => prev.map((u) => (u.id === updated.id ? updated : u)))}
+        />
+      )}
+
+      {creating && (
+        <EditUnitModal
+          marcas={ALL_BRANDS}
+          onClose={() => setCreating(false)}
+          onSaved={(created) => setUnits((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')))}
         />
       )}
     </>
