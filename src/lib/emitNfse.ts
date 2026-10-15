@@ -133,3 +133,29 @@ export async function emitirNfseReal(params: EmitirServicoParams): Promise<Emiti
   }
   return final
 }
+
+export interface ConsultarServicoParams {
+  ambiente: 'homologacao' | 'producao'
+  ref: string
+  mapping: EmitterMappingEntry
+}
+
+// Só consulta o status de uma emissão já feita (sem reenviar nada) — usado
+// pra resincronizar um item que já foi autorizado de verdade na Focus mas o
+// registro local ficou incompleto (ex: faltando url_danfse).
+export async function consultarNfseReal(params: ConsultarServicoParams): Promise<EmitirNfseResult> {
+  const { ambiente, ref, mapping } = params
+  if (!mapping.emitterId) {
+    throw new EmitirNfseError('Nenhum CNPJ emissor configurado para essa marca/serviço (ver Configurações).')
+  }
+  const { data: sessionData } = await supabase.auth.getSession()
+  const accessToken = sessionData.session?.access_token
+  if (!accessToken) throw new EmitirNfseError('Sessão expirada — faça login de novo.')
+
+  const { resp, body } = await callEmitFunction(accessToken, { action: 'consultar', emitterId: mapping.emitterId, ambiente, ref })
+  if (!resp.ok) {
+    const msg = body?.body?.mensagem ?? body?.message ?? body?.error ?? `Falha ao consultar NFS-e (HTTP ${resp.status}).`
+    throw new EmitirNfseError(String(msg))
+  }
+  return body ?? { status: 'erro_consulta' }
+}

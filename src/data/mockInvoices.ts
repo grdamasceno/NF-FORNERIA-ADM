@@ -77,7 +77,7 @@ export const mockInvoiceItems: InvoiceItem[] = raw.map((r, i) => ({
   serviceCode: null,
   value: r.value,
   nfseNumber: r.nfse === '—' ? null : r.nfse,
-  nfseStatus: r.nfse === '—' ? 'falha' : 'simulada',
+  nfseStatus: r.nfse === '—' ? 'falha' : 'autorizada',
   createdAt: '2026-06-01T09:00:00Z',
 }))
 

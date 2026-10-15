@@ -89,7 +89,7 @@ export interface BillingPeriod {
   importedBy: string | null
 }
 
-export type NfseStatus = 'pendente' | 'simulada' | 'falha'
+export type NfseStatus = 'pendente' | 'autorizada' | 'falha'
 export type PaymentStatus = 'paga' | 'a_vencer' | 'atraso' | 'pendente'
 // 'atraso' não está no DDL da seção 4 do MD, mas é citado como estado do fluxo
 // na seção 6 (calculado quando due_date < hoje e não paga).

@@ -7,7 +7,7 @@ import { brandFromTenantName, currentMonthValue, formatBRL, formatCompetencia, s
 import { simulateEmailSend, simulateWhatsappSend } from '@/lib/simulation'
 import { useSettings, type EligibleServiceType, type EmitterMappingEntry } from '@/context/SettingsContext'
 import { emitterKey } from '@/lib/liveEmitters'
-import { emitirNfseReal } from '@/lib/emitNfse'
+import { consultarNfseReal, emitirNfseReal } from '@/lib/emitNfse'
 import { fetchUnits } from '@/lib/liveUnits'
 import {
   deleteInvoices,
@@ -72,6 +72,7 @@ export function Faturamento() {
   const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({})
   const [sendingIds, setSendingIds] = useState<Set<string>>(new Set())
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set())
   // Fluxo de importação em 2 passos: primeiro correlaciona cada linha da
   // planilha com uma unidade real (`matches` ainda undefined → mostra
   // UnitMatchModal); só depois de resolvido mostra o preview de confirmação.
@@ -290,6 +291,39 @@ export function Faturamento() {
   async function emitLote() {
     const pending = invoiceRows.filter((r) => r.status !== 'emitida' && emitDisabledReason(r) === null)
     await Promise.all(pending.map((row) => emitRow(row)))
+  }
+
+  // Só consulta (não reenvia) — pra resincronizar um item que já foi
+  // autorizado de verdade na Focus mas o registro local ficou incompleto
+  // (ex: número/URL do DANFSe faltando porque foi corrigido via SQL direto).
+  async function syncItem(row: LiveInvoiceRow, serviceType: EligibleServiceType) {
+    const item = row.items.find((i) => i.serviceType === serviceType)
+    if (!item || syncingIds.has(item.id)) return
+    setSyncingIds((prev) => new Set(prev).add(item.id))
+    try {
+      const result = await consultarNfseReal({
+        ambiente: 'producao',
+        ref: `${row.unitId}-${serviceType}-${competencia}`,
+        mapping: emitterMapping[emitterKey(row.marca, serviceType)] ?? EMPTY_MAPPING,
+      })
+      if (result.status === 'autorizado') {
+        await recordEmissionResult(item.id, {
+          nfseStatus: 'autorizada',
+          nfseNumber: result.numero ?? item.nfseNumber,
+          urlDanfse: result.url_danfse ?? item.urlDanfse,
+          emitterId: item.emitterId,
+        })
+        await reloadRows()
+      }
+    } catch (e) {
+      console.error('Falha ao consultar status na Focus:', e instanceof Error ? e.message : e)
+    } finally {
+      setSyncingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(item.id)
+        return next
+      })
+    }
   }
 
   async function handleBoletoChange(row: LiveInvoiceRow, file: File | null) {
@@ -568,7 +602,7 @@ export function Faturamento() {
                                     <span className="font-sans font-medium text-faint">{SERVICE_LABEL[it.serviceType]}: </span>
                                     {it.nfseNumber ?? 'processando…'}
                                   </span>
-                                  {it.urlDanfse && (
+                                  {it.urlDanfse ? (
                                     <a
                                       href={it.urlDanfse}
                                       target="_blank"
@@ -577,6 +611,14 @@ export function Faturamento() {
                                     >
                                       Ver DANFSe
                                     </a>
+                                  ) : (
+                                    <button
+                                      onClick={() => syncItem(row, it.serviceType)}
+                                      disabled={syncingIds.has(it.id)}
+                                      className="ml-1 text-[10px] font-bold text-faint underline disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {syncingIds.has(it.id) ? 'Consultando…' : 'Atualizar (buscar PDF)'}
+                                    </button>
                                   )}
                                   {it.emitterId && emittersById[it.emitterId] && (
                                     <div className="text-[10px] text-faint">

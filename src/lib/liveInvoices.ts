@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase'
-import type { Brand, InvoiceStatus, PaymentStatus } from '@/types'
+import type { Brand, Invoice, InvoiceItem, InvoiceStatus, PaymentStatus } from '@/types'
 import type { EligibleServiceType } from '@/context/SettingsContext'
 
 // Fila de faturamento/emissão de verdade, persistida em
@@ -272,4 +272,113 @@ export async function deleteInvoices(ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const { error } = await supabase.from('invoices').delete().in('id', ids)
   if (error) throw error
+}
+
+// --- Painel (Dashboard) — mesmas tabelas, mas no formato `Invoice`/
+// `InvoiceItem` (desnormalizado) que `computeKpis`/`FranchiseTable` já
+// esperavam desde que foram desenhados pro dado real (ver TODO.md →
+// "Inventário de dados fixos/fictícios"). Substitui `mockInvoices` no Painel.
+
+export async function fetchDashboardInvoices(competencia: string): Promise<{ invoices: Invoice[]; items: InvoiceItem[] }> {
+  const referenceMonth = `${competencia}-01`
+  const { data: periods, error: periodsError } = await supabase.from('billing_periods').select('id').eq('reference_month', referenceMonth)
+  if (periodsError) throw periodsError
+  const periodIds = ((periods ?? []) as Array<{ id: string }>).map((p) => p.id)
+  if (periodIds.length === 0) return { invoices: [], items: [] }
+
+  const { data, error } = await supabase
+    .from('invoices')
+    .select(
+      'id, billing_period_id, unit_id, total_value, boleto_file_name, payment_status, whatsapp_sent, email_sent, status, units(name, tenants(name)), billing_periods(imported_at), invoice_items(id, service_type, value, nfse_number, nfse_status, created_at)',
+    )
+    .in('billing_period_id', periodIds)
+  if (error) throw error
+
+  const invoices: Invoice[] = []
+  const items: InvoiceItem[] = []
+  for (const row of (data ?? []) as unknown as Array<{
+    id: string
+    billing_period_id: string
+    unit_id: string
+    total_value: number
+    boleto_file_name: string | null
+    payment_status: PaymentStatus
+    whatsapp_sent: boolean
+    email_sent: boolean
+    status: InvoiceStatus
+    units: { name: string; tenants: { name: string } | { name: string }[] | null } | { name: string; tenants: { name: string } | { name: string }[] | null }[] | null
+    billing_periods: { imported_at: string | null } | { imported_at: string | null }[] | null
+    invoice_items: Array<{ id: string; service_type: EligibleServiceType; value: number; nfse_number: string | null; nfse_status: 'pendente' | 'autorizada' | 'falha'; created_at: string }>
+  }>) {
+    const unit = Array.isArray(row.units) ? row.units[0] : row.units
+    const tenantName = Array.isArray(unit?.tenants) ? unit?.tenants[0]?.name : unit?.tenants?.name
+    const marca = TENANT_NAME_TO_BRAND[tenantName ?? ''] ?? 'Forneria'
+    const bp = Array.isArray(row.billing_periods) ? row.billing_periods[0] : row.billing_periods
+    invoices.push({
+      id: row.id,
+      billingPeriodId: row.billing_period_id,
+      unitId: row.unit_id,
+      unitName: `${marca} ${unit?.name ?? ''}`.trim(),
+      totalValue: Number(row.total_value),
+      paymentMethod: 'boleto_pix',
+      boletoCode: row.boleto_file_name,
+      pixCopiaCola: null,
+      paymentStatus: row.payment_status,
+      dueDate: null,
+      paidAt: null,
+      whatsappSent: row.whatsapp_sent,
+      emailSent: row.email_sent,
+      status: row.status,
+      createdAt: bp?.imported_at ?? new Date().toISOString(),
+    })
+    for (const it of row.invoice_items ?? []) {
+      items.push({
+        id: it.id,
+        invoiceId: row.id,
+        serviceType: it.service_type,
+        serviceCode: null,
+        value: Number(it.value),
+        nfseNumber: it.nfse_number,
+        nfseStatus: it.nfse_status,
+        createdAt: it.created_at,
+      })
+    }
+  }
+  return { invoices, items }
+}
+
+function monthLabel(referenceMonth: string): string {
+  const [year, month] = referenceMonth.split('-').map(Number)
+  const label = new Date(year, (month ?? 1) - 1, 1).toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+// Série real pro gráfico "Faturamento por mês" — 1 ponto por competência que
+// já teve algum invoice gravado (não mais os 6 meses fictícios fixos). Pode
+// vir com só 1 mês no começo, e cresce conforme o uso real do sistema.
+export async function fetchMonthlyTotals(): Promise<{ labels: string[]; issued: number[]; received: number[] }> {
+  const { data, error } = await supabase.from('invoices').select('total_value, payment_status, billing_periods(reference_month)')
+  if (error) throw error
+
+  const byMonth = new Map<string, { issued: number; received: number }>()
+  for (const row of (data ?? []) as unknown as Array<{
+    total_value: number
+    payment_status: PaymentStatus
+    billing_periods: { reference_month: string } | { reference_month: string }[] | null
+  }>) {
+    const bp = Array.isArray(row.billing_periods) ? row.billing_periods[0] : row.billing_periods
+    const month = bp?.reference_month
+    if (!month) continue
+    const entry = byMonth.get(month) ?? { issued: 0, received: 0 }
+    entry.issued += Number(row.total_value)
+    if (row.payment_status === 'paga') entry.received += Number(row.total_value)
+    byMonth.set(month, entry)
+  }
+
+  const months = [...byMonth.keys()].sort()
+  return {
+    labels: months.map(monthLabel),
+    issued: months.map((m) => byMonth.get(m)!.issued),
+    received: months.map((m) => byMonth.get(m)!.received),
+  }
 }
