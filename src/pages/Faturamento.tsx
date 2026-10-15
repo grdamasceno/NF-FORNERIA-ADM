@@ -211,17 +211,23 @@ export function Faturamento() {
   // Cada card conta uma dimensão independente — uma fatura pode ser Emitida
   // + Paga + Enviada ao mesmo tempo, não é "o último status que aconteceu"
   // (status sozinho não dava conta disso: marcar como enviada sobrescrevia
-  // o fato de já estar emitida).
+  // o fato de já estar emitida). "Emitida" não confia no campo `status` da
+  // fatura (podia ficar travado num valor antigo) — calcula direto dos
+  // itens, igual o botão "Emitir"/"Emitida" de cada linha já faz.
+  function isFullyEmitted(row: LiveInvoiceRow) {
+    return row.items.length > 0 && row.items.every((i) => i.nfseStatus === 'autorizada')
+  }
+
   const statusCounts: Array<{ status: keyof typeof statusTag; count: number }> = [
     { status: 'paga', count: invoiceRows.filter((r) => r.paymentStatus === 'paga').length },
     { status: 'enviada', count: invoiceRows.filter((r) => r.whatsappSent || r.emailSent).length },
-    { status: 'emitida', count: invoiceRows.filter((r) => r.status === 'emitida').length },
-    { status: 'pendente_emissao', count: invoiceRows.filter((r) => r.status === 'pendente_emissao').length },
+    { status: 'emitida', count: invoiceRows.filter(isFullyEmitted).length },
+    { status: 'pendente_emissao', count: invoiceRows.filter((r) => !isFullyEmitted(r)).length },
     { status: 'atraso', count: invoiceRows.filter((r) => r.paymentStatus === 'atraso').length },
     { status: 'falha', count: invoiceRows.filter((r) => r.items.some((i) => i.nfseStatus === 'falha')).length },
   ]
 
-  const pendingCount = invoiceRows.filter((r) => r.status !== 'emitida').length
+  const pendingCount = invoiceRows.filter((r) => !isFullyEmitted(r)).length
 
   // Só entra como elegível pra emitir o serviço habilitado, com item
   // pendente/falho salvo (valor > 0 quando a fila foi gravada) e que tenha
@@ -297,7 +303,7 @@ export function Faturamento() {
   }
 
   async function emitLote() {
-    const pending = invoiceRows.filter((r) => r.status !== 'emitida' && emitDisabledReason(r) === null)
+    const pending = invoiceRows.filter((r) => !isFullyEmitted(r) && emitDisabledReason(r) === null)
     await Promise.all(pending.map((row) => emitRow(row)))
   }
 
