@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Tag } from '@/components/dashboard/statusTags'
 import { avatarColor, initials } from '@/lib/format'
-import { fetchUnits } from '@/lib/liveUnits'
+import { deleteUnit, fetchUnits } from '@/lib/liveUnits'
 import { EditUnitModal } from '@/components/franquias/EditUnitModal'
 import type { Brand, LiveUnit } from '@/types'
 
@@ -24,6 +24,23 @@ export function Franquias() {
   const [marca, setMarca] = useState<BrandFilter>('todas')
   const [editing, setEditing] = useState<LiveUnit | null>(null)
   const [creating, setCreating] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  async function handleDelete(u: LiveUnit) {
+    if (!confirm(`Excluir "${u.name}" (${u.marca})? Essa ação não pode ser desfeita.`)) return
+    setDeletingId(u.id)
+    setError(null)
+    try {
+      await deleteUnit(u.id)
+      setUnits((prev) => prev.filter((x) => x.id !== u.id))
+    } catch (e) {
+      // FK sem cascade em invoices.unit_id — se a unidade já emitiu/teve
+      // fatura, o banco recusa o delete em vez de apagar histórico fiscal.
+      setError(e instanceof Error ? e.message : 'Falha ao excluir — a unidade pode já ter faturas/emissões vinculadas.')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -162,12 +179,22 @@ export function Franquias() {
                   <Tag tone={u.active ? 'g' : 'n'} label={u.active ? 'Ativa' : 'Inativa'} />
                 </td>
                 <td className="px-5 py-[13px] text-right align-middle">
-                  <button
-                    onClick={() => setEditing(u)}
-                    className="rounded-[8px] border border-line px-[10px] py-[6px] text-[11px] font-bold text-navy"
-                  >
-                    Editar
-                  </button>
+                  <div className="flex justify-end gap-[6px]">
+                    <button
+                      onClick={() => setEditing(u)}
+                      className="rounded-[8px] border border-line px-[10px] py-[6px] text-[11px] font-bold text-navy"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => handleDelete(u)}
+                      disabled={deletingId === u.id}
+                      title="Excluir unidade"
+                      className="rounded-[8px] border border-line px-[8px] py-[6px] text-[11px] font-bold text-red disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deletingId === u.id ? '…' : '🗑'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

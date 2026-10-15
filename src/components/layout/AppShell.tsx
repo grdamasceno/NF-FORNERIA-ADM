@@ -35,7 +35,7 @@ export function AppShell() {
       <div className="max-[1080px]:hidden">
         <Sidebar collapsed={collapsed} onToggleCollapsed={() => setCollapsed((c) => !c)} />
       </div>
-      <main className="max-w-[1380px] px-7 pb-10 pt-[22px] max-[560px]:px-3.5 max-[560px]:pb-9">
+      <main className="w-[95%] mx-auto px-7 pb-10 pt-[22px] max-[560px]:w-full max-[560px]:px-3.5 max-[560px]:pb-9">
         <CobrandBar />
         <Outlet />
       </main>

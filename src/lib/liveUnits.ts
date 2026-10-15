@@ -157,3 +157,11 @@ export async function updateUnit(id: string, patch: UnitEditableFields): Promise
     .eq('id', id)
   if (error) throw error
 }
+
+// Sem cascade em `invoices.unit_id` (de propósito) — se a unidade já tiver
+// fatura/emissão vinculada, o banco recusa o delete em vez de apagar
+// histórico fiscal junto. O erro sobe pra quem chamou tratar.
+export async function deleteUnit(id: string): Promise<void> {
+  const { error } = await supabase.from('units').delete().eq('id', id)
+  if (error) throw error
+}
