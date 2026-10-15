@@ -96,8 +96,8 @@ Deno.serve(async (req: Request) => {
   // chamável sem autenticação. Mesmo padrão do upload-certificado: valida o
   // usuário logado via Auth e confirma que ele é admin/superadmin da mesma
   // organização do emissor antes de prosseguir.
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader) return jsonResponse({ error: 'unauthorized' }, 401)
+  const callerAuthHeader = req.headers.get('Authorization')
+  if (!callerAuthHeader) return jsonResponse({ error: 'unauthorized' }, 401)
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -106,7 +106,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const userResp = await fetch(`${supabaseUrl}/auth/v1/user`, {
-    headers: { Authorization: authHeader, apikey: serviceRoleKey },
+    headers: { Authorization: callerAuthHeader, apikey: serviceRoleKey },
   })
   if (!userResp.ok) return jsonResponse({ error: 'unauthorized' }, 401)
   const authUser = (await userResp.json()) as { id?: string }
