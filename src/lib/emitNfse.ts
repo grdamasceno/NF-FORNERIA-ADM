@@ -26,6 +26,12 @@ export interface EmitirNfseResult {
 
 export class EmitirNfseError extends Error {}
 
+type FunctionBody = EmitirNfseResult & { error?: string; message?: string; body?: { mensagem?: string; erros?: unknown } }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 // Formato real dos erros da Focus varia (string solta, `{ codigo, mensagem }`,
 // ou só `mensagem` no corpo) — junta o que tiver em vez de assumir uma forma só.
 function describeFocusError(body: EmitirNfseResult | null): string {
@@ -42,9 +48,19 @@ function describeFocusError(body: EmitirNfseResult | null): string {
   }
   if (body?.mensagem) return body.mensagem
   if (body?.status === 'processando_autorizacao') {
-    return 'A Focus ainda está processando essa nota (não autorizou nem rejeitou a tempo) — tente de novo em alguns instantes.'
+    return 'A Focus não confirmou a autorização a tempo — tente "Tentar de novo" em alguns instantes (a nota pode já ter sido autorizada do lado deles).'
   }
   return `Focus NFe retornou status "${body?.status ?? 'desconhecido'}" — não é uma emissão autorizada.`
+}
+
+async function callEmitFunction(accessToken: string, payload: Record<string, unknown>): Promise<{ resp: Response; body: FunctionBody | null }> {
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/emit-nfse`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const body = (await resp.json().catch(() => null)) as FunctionBody | null
+  return { resp, body }
 }
 
 export async function emitirNfseReal(params: EmitirServicoParams): Promise<EmitirNfseResult> {
@@ -63,48 +79,57 @@ export async function emitirNfseReal(params: EmitirServicoParams): Promise<Emiti
   const accessToken = sessionData.session?.access_token
   if (!accessToken) throw new EmitirNfseError('Sessão expirada — faça login de novo.')
 
-  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/emit-nfse`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'emitir',
-      emitterId: mapping.emitterId,
-      ambiente,
-      ref,
-      tomador: {
-        cnpj: unit.cnpj,
-        razaoSocial: unit.razaoSocial,
-        ...(unit.email ? { email: unit.email } : {}),
-        endereco: {
-          logradouro: unit.logradouro,
-          numero: unit.numero,
-          bairro: unit.bairro,
-          codigoMunicipio: unit.codigoMunicipio,
-          uf: unit.uf ?? '',
-          cep: unit.cep,
-        },
+  const { resp, body } = await callEmitFunction(accessToken, {
+    action: 'emitir',
+    emitterId: mapping.emitterId,
+    ambiente,
+    ref,
+    tomador: {
+      cnpj: unit.cnpj,
+      razaoSocial: unit.razaoSocial,
+      ...(unit.email ? { email: unit.email } : {}),
+      endereco: {
+        logradouro: unit.logradouro,
+        numero: unit.numero,
+        bairro: unit.bairro,
+        codigoMunicipio: unit.codigoMunicipio,
+        uf: unit.uf ?? '',
+        cep: unit.cep,
       },
-      servico: {
-        valor,
-        discriminacao,
-        itemListaServico: mapping.itemListaServico,
-        codigoTributarioMunicipio: mapping.codigoTributarioMunicipio ?? undefined,
-        issRetido: mapping.issRetido,
-      },
-    }),
+    },
+    servico: {
+      valor,
+      discriminacao,
+      itemListaServico: mapping.itemListaServico,
+      codigoTributarioMunicipio: mapping.codigoTributarioMunicipio ?? undefined,
+      issRetido: mapping.issRetido,
+    },
   })
-  const body = (await resp.json().catch(() => null)) as (EmitirNfseResult & { error?: string; message?: string; body?: { mensagem?: string; erros?: unknown } }) | null
 
   if (!resp.ok) {
     const msg = body?.body?.mensagem ?? body?.message ?? body?.error ?? `Falha ao emitir NFS-e (HTTP ${resp.status}).`
     throw new EmitirNfseError(String(msg))
   }
-  // Só "autorizado" é sucesso de verdade. `processando_autorizacao` não é
-  // terminal (achado real: ficava marcado como emitido no banco mesmo sem a
-  // Focus ter autorizado — a nota virou ERRO no painel deles) e
-  // erro/erro_autorizacao/cancelado óbvio que não são.
-  if (body?.status !== 'autorizado') {
-    throw new EmitirNfseError(describeFocusError(body))
+
+  // A Edge Function já espera ~10s pela autorização antes de devolver. Se
+  // ainda não resolveu (achado real: a Focus às vezes demora mais que isso
+  // em produção), continua consultando aqui em vez de desistir — nunca
+  // marcar como sucesso sem o status literal "autorizado" (ver histórico:
+  // isso já gravou nota como emitida sem ter sido autorizada de verdade).
+  let final: FunctionBody | null = body
+  for (let attempt = 0; attempt < 6 && final?.status === 'processando_autorizacao'; attempt++) {
+    await sleep(3000)
+    const { body: consultaBody } = await callEmitFunction(accessToken, {
+      action: 'consultar',
+      emitterId: mapping.emitterId,
+      ambiente,
+      ref,
+    })
+    final = consultaBody
   }
-  return body
+
+  if (final?.status !== 'autorizado') {
+    throw new EmitirNfseError(describeFocusError(final))
+  }
+  return final
 }
