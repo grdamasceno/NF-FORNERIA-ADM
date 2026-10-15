@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { currentMonthValue, slugify } from '@/lib/format'
 import { fetchUnits } from '@/lib/liveUnits'
-import { fetchInvoiceRows } from '@/lib/liveInvoices'
+import { createPublicFillLink, fetchInvoiceRows } from '@/lib/liveInvoices'
+import { useSettings } from '@/context/SettingsContext'
 import type { PendingEmissionRow } from '@/data/pendingEmissions'
 import type { Brand, LiveUnit } from '@/types'
 
@@ -40,12 +41,31 @@ function hasDadoFiscalCompleto(u: LiveUnit): boolean {
 // Faturamento levando o resultado via `navigate(..., { state })`.
 export function PreencherValores() {
   const navigate = useNavigate()
+  const { organizationId } = useSettings()
   const [units, setUnits] = useState<LiveUnit[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [competencia, setCompetencia] = useState(currentMonthValue())
   const [brandFilter, setBrandFilter] = useState<BrandFilter>('todas')
   const [values, setValues] = useState<Record<string, RowInput>>({})
+  const [publicLink, setPublicLink] = useState<string | null>(null)
+  const [generatingLink, setGeneratingLink] = useState(false)
+  const [linkError, setLinkError] = useState<string | null>(null)
+
+  async function handleGenerateLink() {
+    if (!organizationId) return
+    setGeneratingLink(true)
+    setLinkError(null)
+    setPublicLink(null)
+    try {
+      const token = await createPublicFillLink(organizationId, competencia)
+      setPublicLink(`${window.location.origin}/preencher-publico/${token}`)
+    } catch (e) {
+      setLinkError(e instanceof Error ? e.message : 'Falha ao gerar link.')
+    } finally {
+      setGeneratingLink(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -69,6 +89,8 @@ export function PreencherValores() {
   // de uma emissão com erro mostrava tudo zerado de novo, obrigando a
   // redigitar em vez de só corrigir/reenviar.
   useEffect(() => {
+    setPublicLink(null)
+    setLinkError(null)
     let cancelled = false
     fetchInvoiceRows(competencia)
       .then((rows) => {
@@ -145,6 +167,14 @@ export function PreencherValores() {
         <div className="flex items-center gap-2 rounded-[11px] border border-line bg-card px-[13px] py-[9px] text-[12.5px] font-semibold text-navy">
           {unfilledCount} unidade{unfilledCount === 1 ? '' : 's'} sem valor preenchido
         </div>
+        <button
+          onClick={handleGenerateLink}
+          disabled={generatingLink || !organizationId}
+          title="Gera um link sem login, travado nessa competência, pra outra pessoa preencher"
+          className="rounded-[11px] border border-line bg-card px-4 py-[10px] text-[12.5px] font-bold text-navy disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {generatingLink ? 'Gerando…' : 'Gerar link público'}
+        </button>
         <button onClick={() => navigate('/faturamento')} className="rounded-[11px] border border-line bg-card px-4 py-[10px] text-[12.5px] font-bold text-navy">
           Cancelar
         </button>
@@ -158,6 +188,20 @@ export function PreencherValores() {
       </PageHeader>
 
       {error && <div className="mb-4 rounded-[11px] bg-red-soft p-3 text-[12.5px] font-semibold text-red">{error}</div>}
+      {linkError && <div className="mb-4 rounded-[11px] bg-red-soft p-3 text-[12.5px] font-semibold text-red">{linkError}</div>}
+      {publicLink && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[11px] bg-green-soft p-3 text-[12.5px] font-semibold text-green">
+          <span>
+            Link gerado (vale só pra {competencia}): <span className="break-all font-normal">{publicLink}</span>
+          </span>
+          <button
+            onClick={() => navigator.clipboard?.writeText(publicLink)}
+            className="rounded-[7px] bg-white px-[10px] py-[5px] text-[11px] font-bold text-navy"
+          >
+            Copiar
+          </button>
+        </div>
+      )}
 
       <div className="mb-4 flex gap-2">
         <BrandFilterTab label="Todas as marcas" active={brandFilter === 'todas'} onClick={() => setBrandFilter('todas')} />

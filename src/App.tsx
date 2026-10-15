@@ -7,6 +7,7 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Franquias } from '@/pages/Franquias'
 import { Faturamento } from '@/pages/Faturamento'
 import { PreencherValores } from '@/pages/PreencherValores'
+import { PreencherPublico } from '@/pages/PreencherPublico'
 import { Relatorios } from '@/pages/Relatorios'
 import { Configuracoes } from '@/pages/Configuracoes'
 
@@ -40,10 +41,21 @@ function Gate() {
   )
 }
 
+// Rota pública fica fora do AuthProvider/Gate de propósito — precisa
+// funcionar sem sessão nenhuma, acessada só por quem tem o token do link
+// (ver supabase/functions/public-fill-values).
 export default function App() {
   return (
-    <AuthProvider>
-      <Gate />
-    </AuthProvider>
+    <Routes>
+      <Route path="/preencher-publico/:token" element={<PreencherPublico />} />
+      <Route
+        path="*"
+        element={
+          <AuthProvider>
+            <Gate />
+          </AuthProvider>
+        }
+      />
+    </Routes>
   )
 }

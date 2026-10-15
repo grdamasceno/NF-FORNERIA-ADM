@@ -278,6 +278,20 @@ export async function deleteInvoices(ids: string[]): Promise<void> {
   if (error) throw error
 }
 
+// Gera um link público (sem login) travado numa única competência — ver
+// supabase/functions/public-fill-values. Token é o próprio uuid gerado pela
+// coluna (gen_random_uuid()), devolvido aqui pra montar a URL.
+export async function createPublicFillLink(organizationId: string, competencia: string): Promise<string> {
+  const { data: userData } = await supabase.auth.getUser()
+  const { data, error } = await supabase
+    .from('public_fill_links')
+    .insert({ organization_id: organizationId, competencia: `${competencia}-01`, created_by: userData.user?.id ?? null })
+    .select('token')
+    .single()
+  if (error) throw error
+  return data.token
+}
+
 // --- Painel (Dashboard) — mesmas tabelas, mas no formato `Invoice`/
 // `InvoiceItem` (desnormalizado) que `computeKpis`/`FranchiseTable` já
 // esperavam desde que foram desenhados pro dado real (ver TODO.md →

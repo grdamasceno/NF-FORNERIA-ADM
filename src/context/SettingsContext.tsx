@@ -28,6 +28,7 @@ export interface AppSettings {
   emitters: EmitterCnpj[]
   emitterMapping: Record<string, EmitterMappingEntry>
   organizationLogoUrl: string | null
+  organizationId: string | null
 }
 
 interface SettingsContextValue extends AppSettings {
@@ -159,6 +160,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       emitters,
       emitterMapping,
       organizationLogoUrl,
+      organizationId,
       toggleServiceEligibility: (service) => {
         setServiceEligibility((prev) => {
           const enabled = !prev[service]
