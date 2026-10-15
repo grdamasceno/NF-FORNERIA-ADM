@@ -92,16 +92,6 @@ export function FranchiseTable({ invoices, items, competencia }: FranchiseTableP
           })}
         </tbody>
       </table>
-
-      <div className="flex items-center justify-center gap-2.5 p-4 text-[11.5px] font-medium text-faint">
-        Emissão <b className="font-bold text-orange">NFS-e RJ</b> via Focus NFe
-        <span className="h-1 w-1 rounded-full bg-[#cfd6dd]" />
-        Cobrança boleto + PIX
-        <span className="h-1 w-1 rounded-full bg-[#cfd6dd]" />
-        Envio automático WhatsApp &amp; e-mail
-        <span className="h-1 w-1 rounded-full bg-[#cfd6dd]" />
-        <b className="font-bold text-orange">ALL IN ONE</b> · OnChannel
-      </div>
     </section>
   )
 }
