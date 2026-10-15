@@ -27,6 +27,7 @@ export interface AppSettings {
   sendChannel: SendChannel
   emitters: EmitterCnpj[]
   emitterMapping: Record<string, EmitterMappingEntry>
+  organizationLogoUrl: string | null
 }
 
 interface SettingsContextValue extends AppSettings {
@@ -49,6 +50,7 @@ interface SettingsContextValue extends AppSettings {
   setEmitterCodigoTributarioMunicipio: (marca: Brand, service: EligibleServiceType, value: string) => void
   setEmitterIssRetido: (marca: Brand, service: EligibleServiceType, issRetido: boolean) => void
   emitterFor: (marca: Brand, service: EligibleServiceType) => EmitterCnpj | null
+  updateOrganizationLogo: (dataUrl: string | null) => Promise<void>
 }
 
 const EMPTY_MAPPING_ENTRY: EmitterMappingEntry = {
@@ -76,6 +78,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [sendChannel, setSendChannel] = useState<SendChannel>('whatsapp')
   const [emitters, setEmitters] = useState<EmitterCnpj[]>([])
   const [emitterMapping, setEmitterMappingState] = useState<Record<string, EmitterMappingEntry>>({})
+  const [organizationLogoUrl, setOrganizationLogoUrl] = useState<string | null>(null)
   const [tenantIdByBrand, setTenantIdByBrand] = useState<Partial<Record<Brand, string>>>({})
   // `superadmin` não tem organização fixa (enxerga todas, via RLS). Hoje só
   // existe uma organização de verdade ("Grupo Original"), então usamos a
@@ -120,6 +123,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         })
       })
 
+    supabase
+      .from('organizations')
+      .select('logo_url')
+      .eq('id', organizationId)
+      .single()
+      .then(({ data, error }) => {
+        if (cancelled || error) return
+        setOrganizationLogoUrl(data?.logo_url ?? null)
+      })
+
     fetchEmitters()
       .then((rows) => {
         if (!cancelled) setEmitters(rows)
@@ -145,6 +158,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       sendChannel,
       emitters,
       emitterMapping,
+      organizationLogoUrl,
       toggleServiceEligibility: (service) => {
         setServiceEligibility((prev) => {
           const enabled = !prev[service]
@@ -243,8 +257,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       },
       emitterFor: (marca, service) =>
         emitters.find((e) => e.id === emitterMapping[emitterKey(marca, service)]?.emitterId) ?? null,
+      updateOrganizationLogo: async (dataUrl) => {
+        if (!organizationId) throw new Error('Sem organização resolvida ainda.')
+        const { error } = await supabase.from('organizations').update({ logo_url: dataUrl }).eq('id', organizationId)
+        if (error) throw error
+        setOrganizationLogoUrl(dataUrl)
+      },
     }),
-    [serviceEligibility, sendChannel, emitters, emitterMapping, organizationId, tenantIdByBrand],
+    [serviceEligibility, sendChannel, emitters, emitterMapping, organizationId, tenantIdByBrand, organizationLogoUrl],
   )
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>

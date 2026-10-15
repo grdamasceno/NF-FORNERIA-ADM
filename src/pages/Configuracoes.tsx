@@ -32,6 +32,8 @@ export function Configuracoes() {
     setEmitterItemListaServico,
     setEmitterCodigoTributarioMunicipio,
     setEmitterIssRetido,
+    organizationLogoUrl,
+    updateOrganizationLogo,
   } = useSettings()
 
   const [razaoSocial, setRazaoSocial] = useState('')
@@ -47,6 +49,8 @@ export function Configuracoes() {
   return (
     <>
       <PageHeader title="Configurações" subtitle="Parâmetros gerais da plataforma" />
+
+      <LogoUploader logoUrl={organizationLogoUrl} onSave={updateOrganizationLogo} />
 
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
         <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-panel">
@@ -290,6 +294,88 @@ export function Configuracoes() {
         </section>
       </div>
     </>
+  )
+}
+
+const MAX_LOGO_BYTES = 500 * 1024
+
+// Logo exibida na barra de co-branding (topo das páginas). Guardada como
+// data URL base64 direto em `organizations.logo_url` — não depende de bucket
+// de Storage configurado no self-hosted (mesmo raciocínio do certificado).
+function LogoUploader({ logoUrl, onSave }: { logoUrl: string | null; onSave: (dataUrl: string | null) => Promise<void> }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function handleFile(file: File | null) {
+    if (!file) return
+    setError(null)
+    if (!file.type.startsWith('image/')) {
+      setError('Envie um arquivo de imagem (PNG, JPG, SVG…).')
+      return
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setError(`Imagem muito grande (máx. ${Math.round(MAX_LOGO_BYTES / 1024)}KB) — use um ícone pequeno.`)
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = async () => {
+      setSaving(true)
+      try {
+        await onSave(String(reader.result))
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Falha ao salvar logo.')
+      } finally {
+        setSaving(false)
+      }
+    }
+    reader.onerror = () => setError('Falha ao ler o arquivo.')
+    reader.readAsDataURL(file)
+  }
+
+  async function handleRemove() {
+    setSaving(true)
+    setError(null)
+    try {
+      await onSave(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao remover logo.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="animate-rise mb-4 rounded-card border border-line bg-card p-5 shadow-panel">
+      <h3 className="mb-1 text-[14.5px] font-bold text-navy">Logo do cliente</h3>
+      <p className="mb-4 text-[11.5px] text-faint">Aparece na barra "Plataforma ALL IN ONE" no topo de todas as telas.</p>
+      <div className="flex items-center gap-4">
+        <div className="flex h-[52px] w-[52px] flex-shrink-0 items-center justify-center overflow-hidden rounded-[13px] border border-line bg-white">
+          {logoUrl ? <img src={logoUrl} alt="Logo do cliente" className="h-full w-full object-cover" /> : <span className="text-[10px] text-faint">Sem logo</span>}
+        </div>
+        <div className="flex flex-col gap-2">
+          <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-[9px] border border-line bg-white px-[13px] py-[8px] text-[12px] font-bold text-navy">
+            {saving ? 'Salvando…' : 'Enviar logo'}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              disabled={saving}
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null
+                e.target.value = ''
+                handleFile(file)
+              }}
+            />
+          </label>
+          {logoUrl && (
+            <button onClick={handleRemove} disabled={saving} className="w-fit text-[11px] font-semibold text-red disabled:opacity-50">
+              Remover logo
+            </button>
+          )}
+        </div>
+      </div>
+      {error && <p className="mt-3 text-[12px] font-semibold text-red">{error}</p>}
+    </section>
   )
 }
 

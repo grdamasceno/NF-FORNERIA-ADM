@@ -26,7 +26,7 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
   return (
     <aside className={`sticky top-0 flex h-screen w-full flex-col border-r border-line bg-card py-[22px] ${collapsed ? 'px-[7px]' : 'px-4'}`}>
       <div className={`flex items-center gap-[11px] pb-[22px] pt-1 ${collapsed ? 'flex-col px-0' : 'px-2'}`}>
-        <div className="h-[38px] w-[38px] flex-shrink-0 overflow-hidden rounded-[11px] bg-white shadow-[0_6px_14px_rgba(233,78,27,.22)]">
+        <div className="h-[38px] w-[38px] flex-shrink-0 overflow-hidden rounded-full border border-faint bg-white">
           <img src={logoOnChannel} alt="OnChannel" className="h-full w-full object-cover" />
         </div>
         {!collapsed && (
