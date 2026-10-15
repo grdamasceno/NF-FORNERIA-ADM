@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { currentMonthValue, slugify } from '@/lib/format'
 import { fetchUnits } from '@/lib/liveUnits'
+import { fetchInvoiceRows } from '@/lib/liveInvoices'
 import type { PendingEmissionRow } from '@/data/pendingEmissions'
 import type { Brand, LiveUnit } from '@/types'
 
@@ -19,6 +20,10 @@ const EMPTY_INPUT: RowInput = { callCenter: '', royalties: '', marketing: '' }
 function parseValue(text: string): number {
   const n = Number(text.replace(',', '.'))
   return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function formatInputValue(n: number): string {
+  return n > 0 ? String(n).replace('.', ',') : ''
 }
 
 function hasDadoFiscalCompleto(u: LiveUnit): boolean {
@@ -59,6 +64,31 @@ export function PreencherValores() {
     }
   }, [])
 
+  // Pré-carrega o que já foi salvo pra essa competência (fila real,
+  // `nf_forneria.invoices/invoice_items`) — sem isso, reabrir a tela depois
+  // de uma emissão com erro mostrava tudo zerado de novo, obrigando a
+  // redigitar em vez de só corrigir/reenviar.
+  useEffect(() => {
+    let cancelled = false
+    fetchInvoiceRows(competencia)
+      .then((rows) => {
+        if (cancelled) return
+        const prefill: Record<string, RowInput> = {}
+        for (const row of rows) {
+          prefill[row.unitId] = {
+            callCenter: formatInputValue(row.callCenterValue),
+            royalties: formatInputValue(row.royaltiesValue),
+            marketing: formatInputValue(row.marketingValue),
+          }
+        }
+        setValues(prefill)
+      })
+      .catch((e) => console.error('Falha ao carregar fila existente:', e instanceof Error ? e.message : e))
+    return () => {
+      cancelled = true
+    }
+  }, [competencia])
+
   const brands = useMemo(() => Array.from(new Set(units.map((u) => u.marca))).sort(), [units])
 
   const visibleUnits = useMemo(
@@ -74,6 +104,7 @@ export function PreencherValores() {
     const v = values[u.id]
     return v && (parseValue(v.callCenter) > 0 || parseValue(v.royalties) > 0 || parseValue(v.marketing) > 0)
   }).length
+  const unfilledCount = units.length - filledCount
 
   function handleConfirm() {
     const rows: PendingEmissionRow[] = units
@@ -111,6 +142,9 @@ export function PreencherValores() {
             className="rounded-[9px] border border-line bg-card px-[11px] py-[7px] text-[12.5px] font-semibold text-navy focus:outline-none focus:ring-2 focus:ring-orange-soft"
           />
         </label>
+        <div className="flex items-center gap-2 rounded-[11px] border border-line bg-card px-[13px] py-[9px] text-[12.5px] font-semibold text-navy">
+          {unfilledCount} unidade{unfilledCount === 1 ? '' : 's'} sem valor preenchido
+        </div>
         <button onClick={() => navigate('/faturamento')} className="rounded-[11px] border border-line bg-card px-4 py-[10px] text-[12.5px] font-bold text-navy">
           Cancelar
         </button>
