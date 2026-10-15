@@ -47,6 +47,7 @@ export function PreencherValores() {
   const [error, setError] = useState<string | null>(null)
   const [competencia, setCompetencia] = useState(currentMonthValue())
   const [brandFilter, setBrandFilter] = useState<BrandFilter>('todas')
+  const [onlyUnfilled, setOnlyUnfilled] = useState(false)
   const [values, setValues] = useState<Record<string, RowInput>>({})
   const [publicLink, setPublicLink] = useState<string | null>(null)
   const [generatingLink, setGeneratingLink] = useState(false)
@@ -113,9 +114,18 @@ export function PreencherValores() {
 
   const brands = useMemo(() => Array.from(new Set(units.map((u) => u.marca))).sort(), [units])
 
+  function isFilled(u: LiveUnit): boolean {
+    const v = values[u.id]
+    return !!v && (parseValue(v.callCenter) > 0 || parseValue(v.royalties) > 0 || parseValue(v.marketing) > 0)
+  }
+
   const visibleUnits = useMemo(
-    () => units.filter((u) => u.active && (brandFilter === 'todas' || u.marca === brandFilter)),
-    [units, brandFilter],
+    () =>
+      units.filter(
+        (u) => u.active && (brandFilter === 'todas' || u.marca === brandFilter) && (!onlyUnfilled || !isFilled(u)),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [units, brandFilter, onlyUnfilled, values],
   )
 
   function setField(unitId: string, field: keyof RowInput, text: string) {
@@ -203,11 +213,22 @@ export function PreencherValores() {
         </div>
       )}
 
-      <div className="mb-4 flex gap-2">
-        <BrandFilterTab label="Todas as marcas" active={brandFilter === 'todas'} onClick={() => setBrandFilter('todas')} />
-        {brands.map((b) => (
-          <BrandFilterTab key={b} label={b} active={brandFilter === b} onClick={() => setBrandFilter(b)} />
-        ))}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-2">
+          <BrandFilterTab label="Todas as marcas" active={brandFilter === 'todas'} onClick={() => setBrandFilter('todas')} />
+          {brands.map((b) => (
+            <BrandFilterTab key={b} label={b} active={brandFilter === b} onClick={() => setBrandFilter(b)} />
+          ))}
+        </div>
+        <label className="flex items-center gap-2 rounded-[11px] border border-line bg-card px-[13px] py-[9px] text-[12.5px] font-bold text-navy">
+          <input
+            type="checkbox"
+            checked={onlyUnfilled}
+            onChange={(e) => setOnlyUnfilled(e.target.checked)}
+            className="h-[14px] w-[14px] accent-orange"
+          />
+          Só pendentes
+        </label>
       </div>
 
       <section className="animate-rise overflow-hidden rounded-card border border-line bg-card shadow-panel">
