@@ -254,9 +254,20 @@ export async function updateInvoicePayment(invoiceId: string, paymentStatus: Pay
   if (error) throw error
 }
 
-export async function updateInvoiceBoleto(invoiceId: string, fileName: string): Promise<void> {
-  const { error } = await supabase.from('invoices').update({ boleto_file_name: fileName }).eq('id', invoiceId)
+export async function updateInvoiceBoleto(invoiceId: string, fileName: string, dataUrl: string): Promise<void> {
+  const { error } = await supabase
+    .from('invoices')
+    .update({ boleto_file_name: fileName, boleto_file_data: dataUrl })
+    .eq('id', invoiceId)
   if (error) throw error
+}
+
+// Lido só sob demanda (Ver/Baixar) — fica fora do select da listagem pra
+// não carregar o PDF de todas as faturas de uma vez.
+export async function fetchBoletoDataUrl(invoiceId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('invoices').select('boleto_file_data').eq('id', invoiceId).single()
+  if (error) throw error
+  return (data?.boleto_file_data as string | null) ?? null
 }
 
 // Não mexe em `status` — isso fica só pro ciclo de emissão (ver

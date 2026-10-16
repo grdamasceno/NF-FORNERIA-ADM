@@ -15,6 +15,7 @@ import {
   markInvoiceSent,
   recordEmissionResult,
   saveQueueRows,
+  fetchBoletoDataUrl,
   updateInvoiceBoleto,
   updateInvoicePayment,
   updateInvoiceStatus,
@@ -25,6 +26,8 @@ import { ImportPreviewModal } from '@/components/faturamento/ImportPreviewModal'
 import { rowMatchKey, UnitMatchModal, type UnitMatches } from '@/components/faturamento/UnitMatchModal'
 import { type PendingEmissionRow } from '@/data/pendingEmissions'
 import type { LiveUnit } from '@/types'
+
+const MAX_BOLETO_BYTES = 3 * 1024 * 1024
 
 const EMPTY_MAPPING: EmitterMappingEntry = { emitterId: null, itemListaServico: null, codigoTributarioMunicipio: null, issRetido: false }
 const SERVICE_TYPES: EligibleServiceType[] = ['call_center', 'royalties', 'marketing']
@@ -342,8 +345,48 @@ export function Faturamento() {
 
   async function handleBoletoChange(row: LiveInvoiceRow, file: File | null) {
     if (!file) return
-    await updateInvoiceBoleto(row.id, file.name)
-    await reloadRows()
+    if (file.size > MAX_BOLETO_BYTES) {
+      setImportError(`Boleto muito grande (máx. ${Math.round(MAX_BOLETO_BYTES / 1024 / 1024)}MB).`)
+      return
+    }
+    setImportError(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Falha ao ler o arquivo.'))
+        reader.readAsDataURL(file)
+      })
+      await updateInvoiceBoleto(row.id, file.name, dataUrl)
+      await reloadRows()
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : 'Falha ao anexar o boleto.')
+    }
+  }
+
+  // Abre/baixa o boleto guardado. Blob URL (não data URL direto) porque o
+  // Chrome bloqueia navegação top-level pra data: URL em nova aba.
+  async function openBoleto(row: LiveInvoiceRow, mode: 'view' | 'download') {
+    try {
+      const dataUrl = await fetchBoletoDataUrl(row.id)
+      if (!dataUrl) {
+        setImportError('O arquivo desse boleto não foi guardado (anexado antes dessa função existir) — anexe de novo.')
+        return
+      }
+      const blob = await (await fetch(dataUrl)).blob()
+      const url = URL.createObjectURL(blob)
+      if (mode === 'view') {
+        window.open(url, '_blank', 'noopener')
+      } else {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = row.boletoFileName ?? 'boleto'
+        a.click()
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : 'Falha ao abrir o boleto.')
+    }
   }
 
   function toggleShowNfse(id: string) {
@@ -544,6 +587,24 @@ export function Faturamento() {
                               onChange={(e) => handleBoletoChange(row, e.target.files?.[0] ?? null)}
                             />
                           </label>
+                          {row.boletoFileName && (
+                            <>
+                              <button
+                                onClick={() => openBoleto(row, 'view')}
+                                title="Visualizar boleto"
+                                className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
+                              >
+                                Ver
+                              </button>
+                              <button
+                                onClick={() => openBoleto(row, 'download')}
+                                title="Baixar boleto"
+                                className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
+                              >
+                                Baixar
+                              </button>
+                            </>
+                          )}
 
                           <button
                             onClick={() => togglePayment(row)}
