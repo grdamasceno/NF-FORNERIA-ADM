@@ -53,6 +53,10 @@ export async function resendPasswordReset(userId: string): Promise<void> {
   await callManageUsers({ action: 'reset_password', userId, redirectTo: `${window.location.origin}/redefinir-senha` })
 }
 
+export async function setUserPassword(userId: string, password: string): Promise<void> {
+  await callManageUsers({ action: 'set_password', userId, password })
+}
+
 export async function removeUser(userId: string): Promise<void> {
   await callManageUsers({ action: 'remove', userId })
 }

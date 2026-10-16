@@ -3,7 +3,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Tag } from '@/components/dashboard/statusTags'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
-import { createUser, fetchUsers, removeUser, resendPasswordReset, updateUser, type LiveAppUser } from '@/lib/liveUsers'
+import { createUser, fetchUsers, removeUser, resendPasswordReset, setUserPassword, updateUser, type LiveAppUser } from '@/lib/liveUsers'
 
 interface OrgOption {
   id: string
@@ -36,6 +36,12 @@ export function Usuarios() {
 
   const [newOrgName, setNewOrgName] = useState('')
   const [creatingOrg, setCreatingOrg] = useState(false)
+
+  const [settingPasswordFor, setSettingPasswordFor] = useState<LiveAppUser | null>(null)
+  const [passwordValue, setPasswordValue] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
 
   function reload() {
     setLoading(true)
@@ -134,6 +140,36 @@ export function Usuarios() {
     }
   }
 
+  function startSetPassword(u: LiveAppUser) {
+    setSettingPasswordFor(u)
+    setPasswordValue('')
+    setPasswordConfirm('')
+    setPasswordError(null)
+  }
+
+  async function handleSetPassword() {
+    if (!settingPasswordFor) return
+    if (passwordValue.length < 6) {
+      setPasswordError('A senha precisa ter pelo menos 6 caracteres.')
+      return
+    }
+    if (passwordValue !== passwordConfirm) {
+      setPasswordError('As senhas não coincidem.')
+      return
+    }
+    setPasswordSaving(true)
+    setPasswordError(null)
+    try {
+      await setUserPassword(settingPasswordFor.id, passwordValue)
+      setNotice(`Senha definida pra "${settingPasswordFor.email}".`)
+      setSettingPasswordFor(null)
+    } catch (e) {
+      setPasswordError(e instanceof Error ? e.message : 'Falha ao definir senha.')
+    } finally {
+      setPasswordSaving(false)
+    }
+  }
+
   async function handleCreateOrg() {
     if (!newOrgName.trim()) return
     setCreatingOrg(true)
@@ -156,6 +192,51 @@ export function Usuarios() {
 
       {error && <div className="mb-4 rounded-[11px] bg-red-soft p-3 text-[12.5px] font-semibold text-red">⚠ {error}</div>}
       {notice && <div className="mb-4 rounded-[11px] bg-green-soft p-3 text-[12.5px] font-semibold text-green">✓ {notice}</div>}
+
+      {settingPasswordFor && (
+        <section className="animate-rise mb-[18px] rounded-card border border-line bg-card p-5 shadow-panel">
+          <h3 className="mb-3 text-[14.5px] font-bold text-navy">Definir senha — {settingPasswordFor.email}</h3>
+          <p className="mb-3 text-[11.5px] text-faint">
+            Define a senha direto, sem precisar de e-mail — útil enquanto o link de redefinição por e-mail não está 100%.
+          </p>
+          <div className="grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-[.05em] text-faint">Nova senha</span>
+              <input
+                type="password"
+                value={passwordValue}
+                onChange={(e) => setPasswordValue(e.target.value)}
+                className="rounded-[9px] border border-line bg-white px-[11px] py-[8px] text-[12.5px] text-navy focus:outline-none focus:ring-2 focus:ring-orange-soft"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-[.05em] text-faint">Confirmar senha</span>
+              <input
+                type="password"
+                value={passwordConfirm}
+                onChange={(e) => setPasswordConfirm(e.target.value)}
+                className="rounded-[9px] border border-line bg-white px-[11px] py-[8px] text-[12.5px] text-navy focus:outline-none focus:ring-2 focus:ring-orange-soft"
+              />
+            </label>
+          </div>
+          {passwordError && <p className="mt-3 text-[12px] font-semibold text-red">⚠ {passwordError}</p>}
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={handleSetPassword}
+              disabled={passwordSaving}
+              className="rounded-[11px] bg-orange px-5 py-[10px] text-[12.5px] font-bold text-white shadow-[0_6px_14px_rgba(233,78,27,.28)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {passwordSaving ? 'Salvando…' : 'Salvar senha'}
+            </button>
+            <button
+              onClick={() => setSettingPasswordFor(null)}
+              className="rounded-[11px] border border-line px-5 py-[10px] text-[12.5px] font-bold text-navy"
+            >
+              Cancelar
+            </button>
+          </div>
+        </section>
+      )}
 
       {isSuper && (
         <section className="animate-rise mb-[18px] rounded-card border border-line bg-card p-5 shadow-panel">
@@ -283,6 +364,12 @@ export function Usuarios() {
                       className="rounded-[8px] border border-line px-[10px] py-[6px] text-[11px] font-bold text-navy"
                     >
                       Editar
+                    </button>
+                    <button
+                      onClick={() => startSetPassword(u)}
+                      className="rounded-[8px] border border-line px-[10px] py-[6px] text-[11px] font-bold text-navy"
+                    >
+                      Definir senha
                     </button>
                     <button
                       onClick={() => handleResend(u)}

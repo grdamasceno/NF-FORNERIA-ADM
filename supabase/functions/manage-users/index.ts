@@ -10,6 +10,7 @@
 //   { action: 'create', email, role: 'admin'|'superadmin', organizationId?, name? }
 //   { action: 'update', userId, role?, organizationId?, name? }
 //   { action: 'reset_password', userId }
+//   { action: 'set_password', userId, password }
 //   { action: 'remove', userId }
 
 import { createClient } from 'jsr:@supabase/supabase-js@2'
@@ -97,13 +98,14 @@ Deno.serve(async (req: Request) => {
   const isSuper = callerProfile.role === 'superadmin'
 
   let body: {
-    action?: 'list' | 'create' | 'update' | 'reset_password' | 'remove'
+    action?: 'list' | 'create' | 'update' | 'reset_password' | 'set_password' | 'remove'
     email?: string
     role?: 'admin' | 'superadmin'
     organizationId?: string | null
     userId?: string
     redirectTo?: string
     name?: string
+    password?: string
   }
   try {
     body = await req.json()
@@ -227,6 +229,29 @@ Deno.serve(async (req: Request) => {
       await sendPasswordSetupEmail(supabaseUrl, serviceRoleKey, supabase, email, body.redirectTo)
     } catch (e) {
       return jsonResponse({ error: 'smtp_error', message: e instanceof Error ? e.message : 'Falha ao enviar e-mail.' }, 502)
+    }
+    return jsonResponse({ ok: true })
+  }
+
+  // ---- set_password ----
+  // Define a senha direto, sem passar por e-mail nenhum — útil quando o
+  // SMTP/redirect do servidor de auth está com problema (achado real,
+  // 2026-10-16: redirect_to do self-hosted apontando pro domínio errado).
+  if (body.action === 'set_password') {
+    if (!body.userId || !body.password) return jsonResponse({ error: 'missing_fields' }, 400)
+    if (body.password.length < 6) return jsonResponse({ error: 'weak_password', message: 'Senha precisa ter pelo menos 6 caracteres.' }, 400)
+    const { data: targetProfile } = await supabase.from('profiles').select('organization_id').eq('id', body.userId).single()
+    if (!targetProfile) return jsonResponse({ error: 'not_found' }, 404)
+    if (!isSuper && targetProfile.organization_id !== callerProfile.organization_id) return jsonResponse({ error: 'forbidden' }, 403)
+
+    const updateResp = await fetch(`${supabaseUrl}/auth/v1/admin/users/${body.userId}`, {
+      method: 'PUT',
+      headers: adminHeaders,
+      body: JSON.stringify({ password: body.password }),
+    })
+    if (!updateResp.ok) {
+      const updateBody = await updateResp.json().catch(() => null)
+      return jsonResponse({ error: 'auth_error', message: updateBody?.msg ?? 'Falha ao definir senha.' }, 502)
     }
     return jsonResponse({ ok: true })
   }
