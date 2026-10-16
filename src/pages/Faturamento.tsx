@@ -616,9 +616,18 @@ export function Faturamento() {
                         <div className="flex flex-nowrap items-center gap-[6px]">
                           <label
                             className="cursor-pointer whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
-                            title={row.boletoFileName ?? 'Anexar boleto (upload manual — este app não gera boleto)'}
+                            title={
+                              row.boletoFileName
+                                ? `Boleto anexado (${row.boletoFileName}). Para visualizar ou baixar, clique em "Detalhes". Clique aqui para substituir o arquivo.`
+                                : 'Anexar boleto (upload manual — este app não gera boleto)'
+                            }
                           >
-                            {row.boletoFileName ? '📎 Boleto' : 'Boleto'}
+                            <span className="inline-flex items-center gap-1">
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 16V4M6 10l6-6 6 6M4 20h16" />
+                              </svg>
+                              Boleto{row.boletoFileName ? ' ✓' : ''}
+                            </span>
                             <input
                               type="file"
                               accept=".pdf,.png,.jpg,.jpeg"
@@ -626,27 +635,10 @@ export function Faturamento() {
                               onChange={(e) => handleBoletoChange(row, e.target.files?.[0] ?? null)}
                             />
                           </label>
-                          {row.boletoFileName && (
-                            <>
-                              <button
-                                onClick={() => openBoleto(row, 'view')}
-                                title="Visualizar boleto"
-                                className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
-                              >
-                                Ver
-                              </button>
-                              <button
-                                onClick={() => openBoleto(row, 'download')}
-                                title="Baixar boleto"
-                                className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
-                              >
-                                Baixar
-                              </button>
-                            </>
-                          )}
 
                           <button
                             onClick={() => togglePayment(row)}
+                            title={row.paymentStatus === 'paga' ? 'Clique para voltar a "A pagar"' : 'Clique para marcar como pago'}
                             className={`whitespace-nowrap rounded-[7px] px-[8px] py-[5px] text-[10.5px] font-bold ${
                               row.paymentStatus === 'paga' ? 'bg-green-soft text-green' : 'bg-amber-soft text-amber'
                             }`}
@@ -662,24 +654,21 @@ export function Faturamento() {
                             <button
                               disabled={disabledReason !== null}
                               onClick={() => emitRow(row)}
-                              title={disabledReason ?? undefined}
+                              title={
+                                disabledReason ??
+                                (hasAutorizada ? 'Para cancelar uma nota já emitida, clique em "Detalhes"' : 'Emitir NFS-e real (Focus NFe)')
+                              }
                               className="whitespace-nowrap rounded-[7px] bg-orange px-[8px] py-[5px] text-[10.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {hasFalha ? 'Tentar de novo' : eligible.length === 0 && hasAutorizada ? 'Emitida' : 'Emitir'}
                             </button>
                           )}
 
-                          {hasAutorizada && (
-                            <button
-                              onClick={() => toggleShowNfse(row.id)}
-                              className="whitespace-nowrap rounded-[7px] bg-green-soft px-[8px] py-[5px] text-[10.5px] font-bold text-green"
-                            >
-                              Ver nota fiscal
-                            </button>
-                          )}
-
                           {sent ? (
-                            <span className="whitespace-nowrap rounded-[7px] bg-blue-soft px-[8px] py-[5px] text-[10.5px] font-bold text-blue">
+                            <span
+                              title="Cobrança já enviada ao franqueado"
+                              className="whitespace-nowrap rounded-[7px] bg-blue-soft px-[8px] py-[5px] text-[10.5px] font-bold text-blue"
+                            >
                               Enviado ✓
                             </span>
                           ) : sending ? (
@@ -689,11 +678,24 @@ export function Faturamento() {
                           ) : (
                             <button
                               onClick={() => sendRow(row)}
+                              title="Enviar a cobrança ao franqueado"
                               className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
                             >
                               Enviar
                             </button>
                           )}
+
+                          <button
+                            onClick={() => toggleShowNfse(row.id)}
+                            title={
+                              expandedIds.has(row.id)
+                                ? 'Ocultar boleto e notas fiscais'
+                                : 'Mostrar ações do boleto e das notas fiscais (ver, baixar, cancelar)'
+                            }
+                            className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
+                          >
+                            Detalhes {expandedIds.has(row.id) ? '▴' : '▾'}
+                          </button>
                         </div>
 
                         {hasFalha && (
@@ -706,55 +708,79 @@ export function Faturamento() {
                           </div>
                         )}
 
-                        {expandedIds.has(row.id) && row.items.length > 0 && (
-                          <div className="flex flex-col gap-1 pl-0.5">
+                        {expandedIds.has(row.id) && (
+                          <div className="flex flex-wrap items-center gap-[6px] rounded-[8px] bg-[#f6f7f9] p-[6px]">
+                            {row.boletoFileName ? (
+                              <>
+                                <button
+                                  onClick={() => openBoleto(row, 'view')}
+                                  title="Visualizar o boleto anexado"
+                                  className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
+                                >
+                                  Ver boleto
+                                </button>
+                                <button
+                                  onClick={() => openBoleto(row, 'download')}
+                                  title="Baixar o boleto anexado"
+                                  className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-navy"
+                                >
+                                  Baixar boleto
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-[10.5px] text-faint">Sem boleto anexado.</span>
+                            )}
                             {row.items
                               .filter((it) => it.nfseStatus === 'autorizada' || it.nfseStatus === 'cancelada')
-                              .map((it) => (
-                                <div key={it.id}>
-                                  <span className="font-display text-[10.5px] font-bold text-navy">
-                                    <span className="font-sans font-medium text-faint">{SERVICE_LABEL[it.serviceType as EligibleServiceType]}: </span>
-                                    <span className={it.nfseStatus === 'cancelada' ? 'line-through opacity-60' : ''}>
-                                      {it.nfseNumber ?? 'processando…'}
-                                    </span>
-                                  </span>
-                                  {it.nfseStatus === 'cancelada' && (
-                                    <span className="ml-1 text-[10px] font-bold text-red-600">Cancelada</span>
-                                  )}
-                                  {it.nfseStatus === 'autorizada' && (
-                                    <button
-                                      onClick={() => cancelItem(row, it.serviceType as EligibleServiceType)}
-                                      disabled={syncingIds.has(it.id)}
-                                      className="ml-1 text-[10px] font-bold text-red-600 underline disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      Cancelar
-                                    </button>
-                                  )}
-                                  {it.urlDanfse ? (
-                                    <a
-                                      href={it.urlDanfse}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="ml-1 text-[10px] font-bold text-orange underline"
-                                    >
-                                      Ver DANFSe
-                                    </a>
-                                  ) : (
-                                    <button
-                                      onClick={() => syncItem(row, it.serviceType)}
-                                      disabled={syncingIds.has(it.id)}
-                                      className="ml-1 text-[10px] font-bold text-faint underline disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      {syncingIds.has(it.id) ? 'Consultando…' : 'Atualizar (buscar PDF)'}
-                                    </button>
-                                  )}
-                                  {it.emitterId && emittersById[it.emitterId] && (
-                                    <div className="text-[10px] text-faint">
-                                      {emittersById[it.emitterId].razaoSocial} · {emittersById[it.emitterId].cnpj}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
+                              .map((it) => {
+                                const label = SERVICE_LABEL[it.serviceType as EligibleServiceType]
+                                const cancelled = it.nfseStatus === 'cancelada'
+                                return (
+                                  <div key={it.id} className="flex items-center gap-[6px]">
+                                    {it.urlDanfse ? (
+                                      <a
+                                        href={it.urlDanfse}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        title={`Abrir a NFS-e de ${label} (DANFSe)${
+                                          it.emitterId && emittersById[it.emitterId]
+                                            ? ` — emitida por ${emittersById[it.emitterId].razaoSocial} · ${emittersById[it.emitterId].cnpj}`
+                                            : ''
+                                        }`}
+                                        className={`whitespace-nowrap rounded-[7px] bg-green-soft px-[8px] py-[5px] text-[10.5px] font-bold text-green ${
+                                          cancelled ? 'line-through opacity-60' : ''
+                                        }`}
+                                      >
+                                        Ver nota {label} {it.nfseNumber ?? ''}
+                                      </a>
+                                    ) : (
+                                      <button
+                                        onClick={() => syncItem(row, it.serviceType)}
+                                        disabled={syncingIds.has(it.id)}
+                                        title="PDF ainda não disponível — consulta a Focus de novo"
+                                        className="whitespace-nowrap rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-faint disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {syncingIds.has(it.id) ? 'Consultando…' : `Nota ${label}: buscar PDF`}
+                                      </button>
+                                    )}
+                                    {cancelled ? (
+                                      <span className="text-[10.5px] font-bold text-red">Cancelada</span>
+                                    ) : (
+                                      <button
+                                        onClick={() => cancelItem(row, it.serviceType as EligibleServiceType)}
+                                        disabled={syncingIds.has(it.id)}
+                                        title={`Cancelar a NFS-e de ${label} na prefeitura (pede justificativa)`}
+                                        className="whitespace-nowrap rounded-[7px] border border-red/40 bg-white px-[8px] py-[5px] text-[10.5px] font-bold text-red disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        Cancelar nota {label}
+                                      </button>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            {!hasAutorizada && !row.items.some((it) => it.nfseStatus === 'cancelada') && (
+                              <span className="text-[10.5px] text-faint">Nenhuma nota emitida.</span>
+                            )}
                           </div>
                         )}
                       </div>
