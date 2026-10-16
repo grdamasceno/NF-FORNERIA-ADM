@@ -3,8 +3,9 @@
 // Chamada pela tela de login (sem sessão nenhuma, de propósito — é o fluxo
 // "esqueci minha senha"). Gera o link de recuperação pela API de admin do
 // Supabase (não depende do SMTP do GOTRUE, que não estava entregando) e
-// manda esse link pelo SMTP próprio da organização (nf_forneria.
-// smtp_settings, migration 0017). Sempre devolve { ok: true } — nunca vaza
+// manda esse link pelo SMTP próprio do app (nf_forneria.smtp_settings,
+// migration 0017/0018 — singleton, um só pro app inteiro). Sempre devolve
+// { ok: true } — nunca vaza
 // se o e-mail existe ou não (mitigação de enumeração de conta).
 
 import { createClient } from 'jsr:@supabase/supabase-js@2'
@@ -38,8 +39,6 @@ Deno.serve(async (req: Request) => {
     if (!user) return jsonResponse({ ok: true })
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, { db: { schema: 'nf_forneria' } })
-    const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single()
-    if (!profile?.organization_id) return jsonResponse({ ok: true })
 
     const linkResp = await fetch(`${supabaseUrl}/auth/v1/admin/generate_link`, {
       method: 'POST',
@@ -56,7 +55,7 @@ Deno.serve(async (req: Request) => {
     const { data: smtp } = await supabase
       .from('smtp_settings')
       .select('host, port, username, password, from_email, from_name, enabled')
-      .eq('organization_id', profile.organization_id)
+      .eq('singleton', true)
       .maybeSingle()
     if (!smtp || !smtp.enabled) return jsonResponse({ ok: true })
 

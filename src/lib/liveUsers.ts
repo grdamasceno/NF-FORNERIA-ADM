@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 export interface LiveAppUser {
   id: string
   email: string
+  name: string | null
   role: 'admin' | 'superadmin'
   organizationId: string | null
   organizationName: string | null
@@ -31,9 +32,21 @@ export async function fetchUsers(): Promise<LiveAppUser[]> {
   return (body.users as LiveAppUser[]) ?? []
 }
 
-export async function createUser(params: { email: string; role: 'admin' | 'superadmin'; organizationId?: string }): Promise<{ emailWarning: string | null }> {
+export async function createUser(params: {
+  email: string
+  role: 'admin' | 'superadmin'
+  organizationId?: string
+  name?: string
+}): Promise<{ emailWarning: string | null }> {
   const body = await callManageUsers({ action: 'create', ...params, redirectTo: `${window.location.origin}/redefinir-senha` })
   return { emailWarning: (body.emailWarning as string | null) ?? null }
+}
+
+export async function updateUser(
+  userId: string,
+  params: { role?: 'admin' | 'superadmin'; organizationId?: string | null; name?: string },
+): Promise<void> {
+  await callManageUsers({ action: 'update', userId, ...params })
 }
 
 export async function resendPasswordReset(userId: string): Promise<void> {

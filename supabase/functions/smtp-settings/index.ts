@@ -1,9 +1,11 @@
 // NF-FORNERIA-ADM · smtp-settings
 //
 // Lê/grava o SMTP próprio do app (nf_forneria.smtp_settings, migration
-// 0017) — nunca devolve a senha de volta pro navegador, só confirma que
-// está configurado. Só superadmin mexe nisso (é credencial compartilhada
-// por toda a organização, igual token da Focus NFe).
+// 0017/0018) — nunca devolve a senha de volta pro navegador, só confirma
+// que está configurado. Só superadmin mexe nisso. Tabela é singleton (uma
+// config só pro app inteiro, não por organização — pedido do usuário,
+// evita o caso de um superadmin sem organização nenhuma não ter de onde
+// puxar SMTP).
 //
 // POST body:
 //   { action: 'get' }
@@ -33,9 +35,8 @@ Deno.serve(async (req: Request) => {
   if (!authUser.id) return jsonResponse({ error: 'unauthorized' }, 401)
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, { db: { schema: 'nf_forneria' } })
-  const { data: profile } = await supabase.from('profiles').select('role, organization_id').eq('id', authUser.id).single()
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', authUser.id).single()
   if (!profile || profile.role !== 'superadmin') return jsonResponse({ error: 'forbidden', message: 'Só superadmin configura SMTP.' }, 403)
-  if (!profile.organization_id) return jsonResponse({ error: 'missing_organization' }, 400)
 
   let body: {
     action?: 'get' | 'save'
@@ -59,18 +60,14 @@ Deno.serve(async (req: Request) => {
     if (!host || !port || !username || !fromEmail) {
       return jsonResponse({ error: 'missing_fields', message: 'Host, porta, usuário e e-mail remetente são obrigatórios.' }, 400)
     }
-    const { data: existing } = await supabase
-      .from('smtp_settings')
-      .select('password')
-      .eq('organization_id', profile.organization_id)
-      .maybeSingle()
+    const { data: existing } = await supabase.from('smtp_settings').select('password').eq('singleton', true).maybeSingle()
     if (!body.password && !existing) {
       return jsonResponse({ error: 'missing_password', message: 'Senha é obrigatória no primeiro cadastro.' }, 400)
     }
 
     const { error } = await supabase.from('smtp_settings').upsert(
       {
-        organization_id: profile.organization_id,
+        singleton: true,
         host,
         port,
         username,
@@ -81,7 +78,7 @@ Deno.serve(async (req: Request) => {
         enabled: body.enabled !== false,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: 'organization_id' },
+      { onConflict: 'singleton' },
     )
     if (error) return jsonResponse({ error: 'db_error', message: error.message }, 500)
     return jsonResponse({ ok: true })
@@ -91,7 +88,7 @@ Deno.serve(async (req: Request) => {
   const { data } = await supabase
     .from('smtp_settings')
     .select('host, port, username, from_email, from_name, use_tls, enabled, updated_at')
-    .eq('organization_id', profile.organization_id)
+    .eq('singleton', true)
     .maybeSingle()
   return jsonResponse({ settings: data ? { ...data, hasPassword: true } : null })
 })

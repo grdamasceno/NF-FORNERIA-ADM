@@ -7,7 +7,8 @@
 //
 // POST body:
 //   { action: 'list' }
-//   { action: 'create', email, role: 'admin'|'superadmin', organizationId? }
+//   { action: 'create', email, role: 'admin'|'superadmin', organizationId?, name? }
+//   { action: 'update', userId, role?, organizationId?, name? }
 //   { action: 'reset_password', userId }
 //   { action: 'remove', userId }
 
@@ -32,12 +33,10 @@ async function sendPasswordSetupEmail(
   serviceRoleKey: string,
   // deno-lint-ignore no-explicit-any
   supabase: any,
-  organizationId: string | null,
   email: string,
   redirectTo: string | undefined,
 ): Promise<void> {
   const adminHeaders = { Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey, 'Content-Type': 'application/json' }
-  if (!organizationId) throw new Error('Usuário sem organização — não dá pra saber qual SMTP usar.')
 
   const linkResp = await fetch(`${supabaseUrl}/auth/v1/admin/generate_link`, {
     method: 'POST',
@@ -53,10 +52,10 @@ async function sendPasswordSetupEmail(
   const { data: smtp } = await supabase
     .from('smtp_settings')
     .select('host, port, username, password, from_email, from_name, enabled')
-    .eq('organization_id', organizationId)
+    .eq('singleton', true)
     .maybeSingle()
   if (!smtp || !smtp.enabled) {
-    throw new Error('SMTP não configurado pra essa organização (ver Configurações → SMTP).')
+    throw new Error('SMTP não configurado (ver Configurações → SMTP).')
   }
 
   const transporter = nodemailer.createTransport({
@@ -98,12 +97,13 @@ Deno.serve(async (req: Request) => {
   const isSuper = callerProfile.role === 'superadmin'
 
   let body: {
-    action?: 'list' | 'create' | 'reset_password' | 'remove'
+    action?: 'list' | 'create' | 'update' | 'reset_password' | 'remove'
     email?: string
     role?: 'admin' | 'superadmin'
-    organizationId?: string
+    organizationId?: string | null
     userId?: string
     redirectTo?: string
+    name?: string
   }
   try {
     body = await req.json()
@@ -115,7 +115,7 @@ Deno.serve(async (req: Request) => {
 
   // ---- list ----
   if (body.action === 'list') {
-    let query = supabase.from('profiles').select('id, role, organization_id, created_at, organizations(name)')
+    let query = supabase.from('profiles').select('id, role, organization_id, name, created_at, organizations(name)')
     if (!isSuper) query = query.eq('organization_id', callerProfile.organization_id)
     const { data: profiles, error } = await query
     if (error) return jsonResponse({ error: 'db_error', message: error.message }, 500)
@@ -124,11 +124,12 @@ Deno.serve(async (req: Request) => {
     const usersBody = (await usersResp.json().catch(() => null)) as { users?: Array<{ id: string; email: string }> } | null
     const emailById = new Map((usersBody?.users ?? []).map((u) => [u.id, u.email]))
 
-    const result = (profiles ?? []).map((p: { id: string; role: string; organization_id: string | null; created_at: string; organizations: { name: string } | { name: string }[] | null }) => {
+    const result = (profiles ?? []).map((p: { id: string; role: string; organization_id: string | null; name: string | null; created_at: string; organizations: { name: string } | { name: string }[] | null }) => {
       const org = Array.isArray(p.organizations) ? p.organizations[0] : p.organizations
       return {
         id: p.id,
         email: emailById.get(p.id) ?? '—',
+        name: p.name,
         role: p.role,
         organizationId: p.organization_id,
         organizationName: org?.name ?? null,
@@ -164,7 +165,7 @@ Deno.serve(async (req: Request) => {
 
     const { error: profileError } = await supabase
       .from('profiles')
-      .insert({ id: newUserId, role, organization_id: organizationId })
+      .insert({ id: newUserId, role, organization_id: organizationId, name: body.name?.trim() || null })
     if (profileError) {
       // reverte o usuário criado no Auth pra não ficar órfão sem perfil
       await fetch(`${supabaseUrl}/auth/v1/admin/users/${newUserId}`, { method: 'DELETE', headers: adminHeaders })
@@ -173,12 +174,41 @@ Deno.serve(async (req: Request) => {
 
     let emailWarning: string | null = null
     try {
-      await sendPasswordSetupEmail(supabaseUrl, serviceRoleKey, supabase, organizationId, email, body.redirectTo)
+      await sendPasswordSetupEmail(supabaseUrl, serviceRoleKey, supabase, email, body.redirectTo)
     } catch (e) {
       emailWarning = e instanceof Error ? e.message : 'Falha ao enviar e-mail de definição de senha.'
     }
 
     return jsonResponse({ ok: true, userId: newUserId, emailWarning })
+  }
+
+  // ---- update ----
+  if (body.action === 'update') {
+    if (!body.userId) return jsonResponse({ error: 'missing_user_id' }, 400)
+    const { data: targetProfile } = await supabase.from('profiles').select('organization_id, role').eq('id', body.userId).single()
+    if (!targetProfile) return jsonResponse({ error: 'not_found' }, 404)
+    if (!isSuper && targetProfile.organization_id !== callerProfile.organization_id) return jsonResponse({ error: 'forbidden' }, 403)
+
+    const patch: { role?: string; organization_id?: string | null; name?: string | null } = {}
+    if (body.name !== undefined) patch.name = body.name.trim() || null
+    if (body.role !== undefined) {
+      if (body.role !== 'admin' && body.role !== 'superadmin') return jsonResponse({ error: 'invalid_role' }, 400)
+      if (body.role === 'superadmin' && !isSuper) return jsonResponse({ error: 'forbidden', message: 'Só superadmin promove a superadmin.' }, 403)
+      patch.role = body.role
+    }
+    if (body.organizationId !== undefined) {
+      if (!isSuper) return jsonResponse({ error: 'forbidden', message: 'Só superadmin muda organização.' }, 403)
+      patch.organization_id = body.organizationId
+    }
+    const finalRole = patch.role ?? targetProfile.role
+    const finalOrgId = patch.organization_id !== undefined ? patch.organization_id : targetProfile.organization_id
+    if (finalRole === 'admin' && !finalOrgId) {
+      return jsonResponse({ error: 'missing_organization', message: 'admin precisa de uma organização.' }, 400)
+    }
+
+    const { error } = await supabase.from('profiles').update(patch).eq('id', body.userId)
+    if (error) return jsonResponse({ error: 'db_error', message: error.message }, 500)
+    return jsonResponse({ ok: true })
   }
 
   // ---- reset_password ----
@@ -194,7 +224,7 @@ Deno.serve(async (req: Request) => {
     if (!email) return jsonResponse({ error: 'not_found' }, 404)
 
     try {
-      await sendPasswordSetupEmail(supabaseUrl, serviceRoleKey, supabase, targetProfile.organization_id, email, body.redirectTo)
+      await sendPasswordSetupEmail(supabaseUrl, serviceRoleKey, supabase, email, body.redirectTo)
     } catch (e) {
       return jsonResponse({ error: 'smtp_error', message: e instanceof Error ? e.message : 'Falha ao enviar e-mail.' }, 502)
     }
