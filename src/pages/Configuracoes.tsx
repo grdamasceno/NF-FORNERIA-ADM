@@ -494,8 +494,7 @@ function LogoUploader({ logoUrl, onSave }: { logoUrl: string | null; onSave: (da
 
   return (
     <section className="animate-rise mb-4 rounded-card border border-line bg-card p-5 shadow-panel">
-      <h3 className="mb-1 text-[14.5px] font-bold text-navy">Logo do cliente</h3>
-      <p className="mb-4 text-[11.5px] text-faint">Aparece na barra "Plataforma ALL IN ONE" no topo de todas as telas.</p>
+      <h3 className="mb-4 text-[14.5px] font-bold text-navy">Logo da empresa</h3>
       <div className="flex items-center gap-4">
         <div className="flex h-[52px] w-[52px] flex-shrink-0 items-center justify-center overflow-hidden rounded-[13px] border border-line bg-white">
           {logoUrl ? <img src={logoUrl} alt="Logo do cliente" className="h-full w-full object-cover" /> : <span className="text-[10px] text-faint">Sem logo</span>}
