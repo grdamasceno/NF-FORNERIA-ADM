@@ -17,7 +17,7 @@ export interface LiveInvoiceItem {
   serviceType: EligibleServiceType
   value: number
   nfseNumber: string | null
-  nfseStatus: 'pendente' | 'autorizada' | 'falha'
+  nfseStatus: 'pendente' | 'autorizada' | 'falha' | 'cancelada'
   urlDanfse: string | null
   errorMessage: string | null
   emitterId: string | null
@@ -45,7 +45,7 @@ interface InvoiceItemRow {
   service_type: EligibleServiceType
   value: number
   nfse_number: string | null
-  nfse_status: 'pendente' | 'autorizada' | 'falha'
+  nfse_status: 'pendente' | 'autorizada' | 'falha' | 'cancelada'
   url_danfse: string | null
   error_message: string | null
   emitter_id: string | null
@@ -244,6 +244,14 @@ export async function recordEmissionResult(
   if (error) throw error
 }
 
+export async function recordCancellation(itemId: string, reason: string): Promise<void> {
+  const { error } = await supabase
+    .from('invoice_items')
+    .update({ nfse_status: 'cancelada', canceled_at: new Date().toISOString(), cancel_reason: reason })
+    .eq('id', itemId)
+  if (error) throw error
+}
+
 export async function updateInvoiceStatus(invoiceId: string, status: InvoiceStatus): Promise<void> {
   const { error } = await supabase.from('invoices').update({ status }).eq('id', invoiceId)
   if (error) throw error
@@ -337,7 +345,7 @@ export async function fetchDashboardInvoices(competencia: string): Promise<{ inv
     status: InvoiceStatus
     units: { name: string; tenants: { name: string } | { name: string }[] | null } | { name: string; tenants: { name: string } | { name: string }[] | null }[] | null
     billing_periods: { imported_at: string | null } | { imported_at: string | null }[] | null
-    invoice_items: Array<{ id: string; service_type: EligibleServiceType; value: number; nfse_number: string | null; nfse_status: 'pendente' | 'autorizada' | 'falha'; created_at: string }>
+    invoice_items: Array<{ id: string; service_type: EligibleServiceType; value: number; nfse_number: string | null; nfse_status: 'pendente' | 'autorizada' | 'falha' | 'cancelada'; created_at: string }>
   }>) {
     const unit = Array.isArray(row.units) ? row.units[0] : row.units
     const tenantName = Array.isArray(unit?.tenants) ? unit?.tenants[0]?.name : unit?.tenants?.name

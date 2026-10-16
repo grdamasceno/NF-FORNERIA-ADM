@@ -36,7 +36,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 type Ambiente = 'homologacao' | 'producao'
 
 interface EmitirBody {
-  action?: 'emitir' | 'consultar'
+  action?: 'emitir' | 'consultar' | 'cancelar'
+  justificativa?: string // obrigatória em 'cancelar' (Focus exige 15+ caracteres)
   emitterId: string
   ambiente: Ambiente
   ref: string
@@ -174,6 +175,31 @@ Deno.serve(async (req: Request) => {
   if (body.action === 'consultar') {
     const result = await consultarNfse(baseUrl, authHeader, ref)
     return jsonResponse(result)
+  }
+
+  // ---- modo "cancelar": cancela NFS-e já autorizada (DELETE na Focus) ----
+  if (body.action === 'cancelar') {
+    const justificativa = body.justificativa?.trim() ?? ''
+    if (justificativa.length < 15) {
+      return jsonResponse({ error: 'invalid_justificativa', message: 'A justificativa precisa ter pelo menos 15 caracteres.' }, 400)
+    }
+    const cancelResp = await fetch(`${baseUrl}/v2/nfsen/${encodeURIComponent(ref)}`, {
+      method: 'DELETE',
+      headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ justificativa }),
+    })
+    const cancelBody = await cancelResp.json().catch(() => null)
+    if (!cancelResp.ok) {
+      return jsonResponse({ error: 'focus_nfe_error', status: cancelResp.status, body: cancelBody }, 502)
+    }
+    // cancelamento também é assíncrono — espera um pouco pelo status final
+    let finalCancel = cancelBody
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (finalCancel?.status === 'cancelado' || finalCancel?.status === 'erro_cancelamento') break
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      finalCancel = await consultarNfse(baseUrl, authHeader, ref)
+    }
+    return jsonResponse(finalCancel)
   }
 
   // ---- modo "emitir" (default) ----

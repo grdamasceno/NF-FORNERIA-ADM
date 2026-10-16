@@ -7,12 +7,13 @@ import { brandFromTenantName, currentMonthValue, formatBRL, formatCompetencia, s
 import { simulateEmailSend, simulateWhatsappSend } from '@/lib/simulation'
 import { useSettings, type EligibleServiceType, type EmitterMappingEntry } from '@/context/SettingsContext'
 import { emitterKey } from '@/lib/liveEmitters'
-import { consultarNfseReal, emitirNfseReal } from '@/lib/emitNfse'
+import { cancelarNfseReal, consultarNfseReal, emitirNfseReal } from '@/lib/emitNfse'
 import { fetchUnits } from '@/lib/liveUnits'
 import {
   deleteInvoices,
   fetchInvoiceRows,
   markInvoiceSent,
+  recordCancellation,
   recordEmissionResult,
   saveQueueRows,
   fetchBoletoDataUrl,
@@ -218,7 +219,8 @@ export function Faturamento() {
   // fatura (podia ficar travado num valor antigo) — calcula direto dos
   // itens, igual o botão "Emitir"/"Emitida" de cada linha já faz.
   function isFullyEmitted(row: LiveInvoiceRow) {
-    return row.items.length > 0 && row.items.every((i) => i.nfseStatus === 'autorizada')
+    const active = row.items.filter((i) => i.nfseStatus !== 'cancelada')
+    return active.length > 0 && active.every((i) => i.nfseStatus === 'autorizada')
   }
 
   const statusCounts: Array<{ status: keyof typeof statusTag; count: number }> = [
@@ -241,7 +243,7 @@ export function Faturamento() {
       serviceType,
       label: SERVICE_LABEL[serviceType],
       item: row.items.find((i) => i.serviceType === serviceType),
-    })).filter((s) => s.item && s.item.nfseStatus !== 'autorizada' && serviceEligibility[s.serviceType] && emitterFor(row.marca, s.serviceType))
+    })).filter((s) => s.item && s.item.nfseStatus !== 'autorizada' && s.item.nfseStatus !== 'cancelada' && serviceEligibility[s.serviceType] && emitterFor(row.marca, s.serviceType))
   }
 
   function emitDisabledReason(row: LiveInvoiceRow): string | null {
@@ -293,7 +295,7 @@ export function Faturamento() {
 
     const refreshed = await fetchInvoiceRows(competencia)
     const updatedRow = refreshed.find((r) => r.id === row.id)
-    if (updatedRow && updatedRow.items.length > 0 && updatedRow.items.every((i) => i.nfseStatus === 'autorizada') && updatedRow.status !== 'emitida') {
+    if (updatedRow && isFullyEmitted(updatedRow) && updatedRow.status !== 'emitida') {
       await updateInvoiceStatus(row.id, 'emitida')
       updatedRow.status = 'emitida'
     }
@@ -334,6 +336,43 @@ export function Faturamento() {
       }
     } catch (e) {
       console.error('Falha ao consultar status na Focus:', e instanceof Error ? e.message : e)
+    } finally {
+      setSyncingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(item.id)
+        return next
+      })
+    }
+  }
+
+  // Cancelamento REAL na Focus/prefeitura — exige justificativa (15+ chars,
+  // regra da Focus) e confirmação explícita. A ref é a mesma usada na
+  // emissão, então uma nota cancelada não pode ser reemitida com ela.
+  async function cancelItem(row: LiveInvoiceRow, serviceType: EligibleServiceType) {
+    const item = row.items.find((i) => i.serviceType === serviceType)
+    if (!item || item.nfseStatus !== 'autorizada' || syncingIds.has(item.id)) return
+    const justificativa = window.prompt(
+      `Cancelar a NFS-e ${item.nfseNumber ?? ''} (${SERVICE_LABEL[serviceType]} — ${row.unitName})?\n\nIsso cancela a nota de verdade na prefeitura. Informe a justificativa (mínimo 15 caracteres):`,
+    )
+    if (justificativa === null) return
+    if (justificativa.trim().length < 15) {
+      setImportError('Justificativa precisa ter pelo menos 15 caracteres.')
+      return
+    }
+    setImportError(null)
+    setSyncingIds((prev) => new Set(prev).add(item.id))
+    try {
+      await cancelarNfseReal({
+        ambiente: 'producao',
+        ref: `${row.unitId}-${serviceType}-${competencia}`,
+        mapping: emitterMapping[emitterKey(row.marca, serviceType)] ?? EMPTY_MAPPING,
+        justificativa: justificativa.trim(),
+      })
+      await recordCancellation(item.id, justificativa.trim())
+      await updateInvoiceStatus(row.id, 'pendente_emissao')
+      await reloadRows()
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : 'Falha ao cancelar a nota.')
     } finally {
       setSyncingIds((prev) => {
         const next = new Set(prev)
@@ -670,13 +709,27 @@ export function Faturamento() {
                         {expandedIds.has(row.id) && row.items.length > 0 && (
                           <div className="flex flex-col gap-1 pl-0.5">
                             {row.items
-                              .filter((it) => it.nfseStatus === 'autorizada')
+                              .filter((it) => it.nfseStatus === 'autorizada' || it.nfseStatus === 'cancelada')
                               .map((it) => (
                                 <div key={it.id}>
                                   <span className="font-display text-[10.5px] font-bold text-navy">
-                                    <span className="font-sans font-medium text-faint">{SERVICE_LABEL[it.serviceType]}: </span>
-                                    {it.nfseNumber ?? 'processando…'}
+                                    <span className="font-sans font-medium text-faint">{SERVICE_LABEL[it.serviceType as EligibleServiceType]}: </span>
+                                    <span className={it.nfseStatus === 'cancelada' ? 'line-through opacity-60' : ''}>
+                                      {it.nfseNumber ?? 'processando…'}
+                                    </span>
                                   </span>
+                                  {it.nfseStatus === 'cancelada' && (
+                                    <span className="ml-1 text-[10px] font-bold text-red-600">Cancelada</span>
+                                  )}
+                                  {it.nfseStatus === 'autorizada' && (
+                                    <button
+                                      onClick={() => cancelItem(row, it.serviceType as EligibleServiceType)}
+                                      disabled={syncingIds.has(it.id)}
+                                      className="ml-1 text-[10px] font-bold text-red-600 underline disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      Cancelar
+                                    </button>
+                                  )}
                                   {it.urlDanfse ? (
                                     <a
                                       href={it.urlDanfse}

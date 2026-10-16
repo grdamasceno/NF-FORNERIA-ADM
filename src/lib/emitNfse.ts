@@ -134,6 +134,37 @@ export async function emitirNfseReal(params: EmitirServicoParams): Promise<Emiti
   return final
 }
 
+// Cancela uma NFS-e já autorizada na Focus (ação fiscal real — a prefeitura
+// é notificada). Só devolve sucesso se a Focus confirmar status "cancelado".
+export async function cancelarNfseReal(params: ConsultarServicoParams & { justificativa: string }): Promise<void> {
+  const { ambiente, ref, mapping, justificativa } = params
+  if (!mapping.emitterId) {
+    throw new EmitirNfseError('Nenhum CNPJ emissor configurado para essa marca/serviço (ver Configurações).')
+  }
+  const { data: sessionData } = await supabase.auth.getSession()
+  const accessToken = sessionData.session?.access_token
+  if (!accessToken) throw new EmitirNfseError('Sessão expirada — faça login de novo.')
+
+  const { resp, body } = await callEmitFunction(accessToken, {
+    action: 'cancelar',
+    emitterId: mapping.emitterId,
+    ambiente,
+    ref,
+    justificativa,
+  })
+  if (!resp.ok) {
+    const msg = body?.body?.mensagem ?? body?.message ?? body?.error ?? `Falha ao cancelar NFS-e (HTTP ${resp.status}).`
+    throw new EmitirNfseError(String(msg))
+  }
+  if (body?.status !== 'cancelado') {
+    throw new EmitirNfseError(
+      body?.status === 'erro_cancelamento'
+        ? describeFocusError(body)
+        : 'A Focus ainda não confirmou o cancelamento — confira o status no painel da Focus antes de tentar de novo.',
+    )
+  }
+}
+
 export interface ConsultarServicoParams {
   ambiente: 'homologacao' | 'producao'
   ref: string
