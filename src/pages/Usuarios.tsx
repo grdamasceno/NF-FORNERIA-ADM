@@ -53,8 +53,12 @@ export function Usuarios() {
     setCreateError(null)
     setCreatedNotice(null)
     try {
-      await createUser({ email: email.trim(), role, organizationId: isSuper ? organizationId || undefined : undefined })
-      setCreatedNotice(`Usuário criado — enviamos um e-mail pra "${email.trim()}" definir a senha (precisa do SMTP configurado pra chegar).`)
+      const { emailWarning } = await createUser({ email: email.trim(), role, organizationId: isSuper ? organizationId || undefined : undefined })
+      setCreatedNotice(
+        emailWarning
+          ? `Usuário criado, mas o e-mail de senha não saiu: ${emailWarning}`
+          : `Usuário criado — enviamos um e-mail pra "${email.trim()}" definir a senha.`,
+      )
       setEmail('')
       reload()
     } catch (e) {

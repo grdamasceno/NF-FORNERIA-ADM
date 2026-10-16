@@ -12,6 +12,7 @@
 //   { action: 'remove', userId }
 
 import { createClient } from 'jsr:@supabase/supabase-js@2'
+import nodemailer from 'npm:nodemailer@6.9.14'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -19,6 +20,57 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function randomPassword(): string {
   return crypto.randomUUID() + crypto.randomUUID()
+}
+
+// Gera o link de recuperação pela API de admin (não depende do SMTP do
+// GOTRUE) e manda pelo SMTP próprio da organização (nf_forneria.
+// smtp_settings) — mesmo mecanismo usado no "esqueci minha senha" do login
+// (ver supabase/functions/request-password-reset). Lança erro com mensagem
+// clara se não der pra mandar, pra aparecer na tela em vez de falhar calado.
+async function sendPasswordSetupEmail(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  organizationId: string | null,
+  email: string,
+  redirectTo: string | undefined,
+): Promise<void> {
+  const adminHeaders = { Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey, 'Content-Type': 'application/json' }
+  if (!organizationId) throw new Error('Usuário sem organização — não dá pra saber qual SMTP usar.')
+
+  const linkResp = await fetch(`${supabaseUrl}/auth/v1/admin/generate_link`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ type: 'recovery', email, redirect_to: redirectTo }),
+  })
+  const linkBody = await linkResp.json().catch(() => null)
+  const actionLink: string | undefined = linkBody?.action_link ?? linkBody?.properties?.action_link
+  if (!linkResp.ok || !actionLink) {
+    throw new Error(linkBody?.msg ?? linkBody?.message ?? 'Falha ao gerar o link de redefinição.')
+  }
+
+  const { data: smtp } = await supabase
+    .from('smtp_settings')
+    .select('host, port, username, password, from_email, from_name, enabled')
+    .eq('organization_id', organizationId)
+    .maybeSingle()
+  if (!smtp || !smtp.enabled) {
+    throw new Error('SMTP não configurado pra essa organização (ver Configurações → SMTP).')
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.port === 465,
+    auth: { user: smtp.username, pass: smtp.password },
+  })
+  await transporter.sendMail({
+    from: smtp.from_name ? `"${smtp.from_name}" <${smtp.from_email}>` : smtp.from_email,
+    to: email,
+    subject: 'Definir sua senha',
+    html: `<p>Clique no link abaixo pra definir sua senha:</p><p><a href="${actionLink}">${actionLink}</a></p>`,
+  })
 }
 
 Deno.serve(async (req: Request) => {
@@ -51,6 +103,7 @@ Deno.serve(async (req: Request) => {
     role?: 'admin' | 'superadmin'
     organizationId?: string
     userId?: string
+    redirectTo?: string
   }
   try {
     body = await req.json()
@@ -118,15 +171,14 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'db_error', message: profileError.message }, 500)
     }
 
-    // dispara o e-mail de "defina sua senha" (mesmo fluxo de recuperação de
-    // senha — precisa de SMTP configurado no GoTrue pra chegar de verdade).
-    await fetch(`${supabaseUrl}/auth/v1/recover`, {
-      method: 'POST',
-      headers: { apikey: serviceRoleKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    }).catch(() => null)
+    let emailWarning: string | null = null
+    try {
+      await sendPasswordSetupEmail(supabaseUrl, serviceRoleKey, supabase, organizationId, email, body.redirectTo)
+    } catch (e) {
+      emailWarning = e instanceof Error ? e.message : 'Falha ao enviar e-mail de definição de senha.'
+    }
 
-    return jsonResponse({ ok: true, userId: newUserId })
+    return jsonResponse({ ok: true, userId: newUserId, emailWarning })
   }
 
   // ---- reset_password ----
@@ -141,14 +193,10 @@ Deno.serve(async (req: Request) => {
     const email = userBody?.email as string | undefined
     if (!email) return jsonResponse({ error: 'not_found' }, 404)
 
-    const recoverResp = await fetch(`${supabaseUrl}/auth/v1/recover`, {
-      method: 'POST',
-      headers: { apikey: serviceRoleKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    })
-    if (!recoverResp.ok) {
-      const recoverBody = await recoverResp.json().catch(() => null)
-      return jsonResponse({ error: 'auth_error', message: recoverBody?.msg ?? 'Falha ao enviar e-mail de redefinição.' }, 502)
+    try {
+      await sendPasswordSetupEmail(supabaseUrl, serviceRoleKey, supabase, targetProfile.organization_id, email, body.redirectTo)
+    } catch (e) {
+      return jsonResponse({ error: 'smtp_error', message: e instanceof Error ? e.message : 'Falha ao enviar e-mail.' }, 502)
     }
     return jsonResponse({ ok: true })
   }

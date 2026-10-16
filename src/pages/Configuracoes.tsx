@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SimBadge } from '@/components/SimBadge'
+import { useAuth } from '@/context/AuthContext'
 import { useSettings, emitterKey, type EligibleServiceType, type SendChannel } from '@/context/SettingsContext'
 import { franchiseBrands } from '@/data/units'
+import { fetchSmtpSettings, saveSmtpSettings, type SmtpSettings } from '@/lib/liveSmtp'
 
 const SERVICE_LABEL: Record<EligibleServiceType, string> = {
   call_center: 'Call Center',
@@ -18,6 +20,7 @@ const SERVICE_LABEL: Record<EligibleServiceType, string> = {
 // recarregar. As demais seções são só exibição, ver
 // TODO.md → "Inventário de dados fixos/fictícios".
 export function Configuracoes() {
+  const { profile } = useAuth()
   const {
     serviceEligibility,
     toggleServiceEligibility,
@@ -51,6 +54,7 @@ export function Configuracoes() {
       <PageHeader title="Configurações" subtitle="Parâmetros gerais da plataforma" />
 
       <LogoUploader logoUrl={organizationLogoUrl} onSave={updateOrganizationLogo} />
+      {profile?.role === 'superadmin' && <SmtpSettingsForm />}
 
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
         <section className="animate-rise rounded-card border border-line bg-card p-5 shadow-panel">
@@ -302,6 +306,150 @@ const MAX_LOGO_BYTES = 500 * 1024
 // Logo exibida na barra de co-branding (topo das páginas). Guardada como
 // data URL base64 direto em `organizations.logo_url` — não depende de bucket
 // de Storage configurado no self-hosted (mesmo raciocínio do certificado).
+const EMPTY_SMTP_FORM = { host: '', port: '587', username: '', password: '', fromEmail: '', fromName: '', useTls: true, enabled: true }
+
+// SMTP próprio do app — usado pra mandar o link de "definir/redefinir
+// senha" (login e cadastro de usuário em Usuários.tsx), já que o SMTP do
+// GOTRUE do self-hosted não estava entregando. Senha nunca volta do
+// servidor — campo fica em branco mesmo com SMTP já configurado; só
+// precisa preencher de novo se quiser trocar.
+function SmtpSettingsForm() {
+  const [form, setForm] = useState(EMPTY_SMTP_FORM)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+  const [hasPassword, setHasPassword] = useState(false)
+
+  useEffect(() => {
+    fetchSmtpSettings()
+      .then((s: SmtpSettings | null) => {
+        if (!s) return
+        setForm({
+          host: s.host,
+          port: String(s.port),
+          username: s.username,
+          password: '',
+          fromEmail: s.fromEmail,
+          fromName: s.fromName ?? '',
+          useTls: s.useTls,
+          enabled: s.enabled,
+        })
+        setHasPassword(s.hasPassword)
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Falha ao carregar SMTP.'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      await saveSmtpSettings({
+        host: form.host.trim(),
+        port: Number(form.port),
+        username: form.username.trim(),
+        password: form.password || undefined,
+        fromEmail: form.fromEmail.trim(),
+        fromName: form.fromName.trim() || undefined,
+        useTls: form.useTls,
+        enabled: form.enabled,
+      })
+      setHasPassword(true)
+      setForm((prev) => ({ ...prev, password: '' }))
+      setSaved(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao salvar.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <section className="animate-rise mb-4 rounded-card border border-line bg-card p-5 shadow-panel text-[12.5px] text-faint">Carregando SMTP…</section>
+  }
+
+  return (
+    <section className="animate-rise mb-4 rounded-card border border-line bg-card p-5 shadow-panel">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-[14.5px] font-bold text-navy">SMTP (e-mail de senha)</h3>
+        <button
+          onClick={() => set('enabled', !form.enabled)}
+          className={`rounded-[8px] px-3 py-[6px] text-[12px] font-bold ${form.enabled ? 'bg-green-soft text-green' : 'bg-[#eef1f4] text-faint'}`}
+        >
+          {form.enabled ? 'Habilitado' : 'Desabilitado'}
+        </button>
+      </div>
+      <p className="mb-4 text-[11.5px] text-faint">
+        Usado pra mandar o link de "definir senha" no cadastro de usuário e no "esqueci minha senha" do login — não depende do SMTP
+        do servidor Supabase.
+      </p>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Host" value={form.host} onChange={(v) => set('host', v)} placeholder="mail.onchannel.io" />
+        <Field label="Porta" value={form.port} onChange={(v) => set('port', v.replace(/\D/g, ''))} placeholder="465" />
+        <Field label="Usuário (auth)" value={form.username} onChange={(v) => set('username', v)} placeholder="suporte@onchannel.io" />
+        <Field
+          label={hasPassword ? 'Senha (deixe em branco pra manter a atual)' : 'Senha'}
+          value={form.password}
+          onChange={(v) => set('password', v)}
+          type="password"
+        />
+        <Field label="E-mail remetente" value={form.fromEmail} onChange={(v) => set('fromEmail', v)} placeholder="suporte@onchannel.io" />
+        <Field label="Nome remetente" value={form.fromName} onChange={(v) => set('fromName', v)} placeholder="Forneria Original" />
+      </div>
+
+      <label className="mt-3 flex items-center gap-2 text-[12px] font-semibold text-navy">
+        <input type="checkbox" checked={form.useTls} onChange={(e) => set('useTls', e.target.checked)} className="h-[14px] w-[14px] accent-orange" />
+        Usar TLS (recomendado — porta 465 implícito, 587 STARTTLS)
+      </label>
+
+      {error && <p className="mt-3 text-[12px] font-semibold text-red">⚠ {error}</p>}
+      {saved && <p className="mt-3 text-[12px] font-semibold text-green">✓ Salvo.</p>}
+
+      <button
+        onClick={handleSave}
+        disabled={saving || !form.host || !form.port || !form.username || !form.fromEmail}
+        className="mt-4 rounded-[11px] bg-orange px-5 py-[10px] text-[12.5px] font-bold text-white shadow-[0_6px_14px_rgba(233,78,27,.28)] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {saving ? 'Salvando…' : 'Salvar SMTP'}
+      </button>
+    </section>
+  )
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-[10px] font-bold uppercase tracking-[.05em] text-faint">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="rounded-[9px] border border-line bg-white px-[11px] py-[8px] text-[12.5px] text-navy placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-orange-soft"
+      />
+    </label>
+  )
+}
+
 function LogoUploader({ logoUrl, onSave }: { logoUrl: string | null; onSave: (dataUrl: string | null) => Promise<void> }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)

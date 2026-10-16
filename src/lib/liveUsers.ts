@@ -31,12 +31,13 @@ export async function fetchUsers(): Promise<LiveAppUser[]> {
   return (body.users as LiveAppUser[]) ?? []
 }
 
-export async function createUser(params: { email: string; role: 'admin' | 'superadmin'; organizationId?: string }): Promise<void> {
-  await callManageUsers({ action: 'create', ...params })
+export async function createUser(params: { email: string; role: 'admin' | 'superadmin'; organizationId?: string }): Promise<{ emailWarning: string | null }> {
+  const body = await callManageUsers({ action: 'create', ...params, redirectTo: `${window.location.origin}/redefinir-senha` })
+  return { emailWarning: (body.emailWarning as string | null) ?? null }
 }
 
 export async function resendPasswordReset(userId: string): Promise<void> {
-  await callManageUsers({ action: 'reset_password', userId })
+  await callManageUsers({ action: 'reset_password', userId, redirectTo: `${window.location.origin}/redefinir-senha` })
 }
 
 export async function removeUser(userId: string): Promise<void> {

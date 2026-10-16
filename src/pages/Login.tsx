@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
 import { BrandMarkIcon } from '@/components/icons'
 import logoOnChannel from '@/assets/logo-onchannel.jpeg'
 
@@ -26,12 +25,19 @@ export function Login() {
     e.preventDefault()
     setLoading(true)
     setError(null)
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/redefinir-senha`,
-    })
-    setLoading(false)
-    if (error) setError(error.message)
-    else setResetSent(true)
+    try {
+      const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/request-password-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_ANON_KEY },
+        body: JSON.stringify({ email, redirectTo: `${window.location.origin}/redefinir-senha` }),
+      })
+      if (!resp.ok) throw new Error(`Falha ao enviar (HTTP ${resp.status}).`)
+      setResetSent(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao enviar.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (mode === 'forgot') {
