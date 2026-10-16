@@ -94,7 +94,8 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
               {session?.user.email ?? 'Forneria Original'}
             </b>
             <span className="text-[10.5px] text-faint">
-              {profile?.role === 'superadmin' ? 'Superadmin' : 'Admin'} · {activeFranchiseCount} unidades
+              {profile?.role === 'superadmin' ? 'Superadmin' : profile?.role === 'admin' ? 'Admin' : '—'} · {activeFranchiseCount}{' '}
+              unidades
             </span>
           </div>
         )}

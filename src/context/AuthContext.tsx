@@ -13,6 +13,14 @@ interface AuthContextValue {
   session: Session | null
   profile: Profile | null
   loading: boolean
+  // true enquanto o perfil (nf_forneria.profiles) ainda está sendo buscado
+  // depois que a sessão já existe — precisa ser um estado à parte de
+  // `loading`, senão uma sessão válida SEM perfil (ex: conta de outro app
+  // que compartilha esse mesmo Supabase Auth, mas nunca foi cadastrada
+  // aqui) fica indistinguível de "ainda carregando" e vaza pro app com
+  // profile null (achado real, 2026-10-16: usuário de outro sistema
+  // conseguiu logar e via um painel com dado incorreto/vazio).
+  profileLoading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
 }
@@ -28,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
 
   // `onAuthStateChange` é a ÚNICA fonte da sessão (não soma com um
   // `getSession()` separado) — ele já dispara sozinho com o evento
@@ -54,9 +63,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!session) {
       setProfile(null)
+      setProfileLoading(false)
       return
     }
     let cancelled = false
+    setProfileLoading(true)
     async function loadProfile() {
       try {
         const { data, error } = await supabase.from('profiles').select('role, organization_id').eq('id', session!.user.id).single()
@@ -70,6 +81,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         console.error('Falha ao carregar perfil do usuário:', err)
         setProfile(null)
+      } finally {
+        if (!cancelled) setProfileLoading(false)
       }
     }
     loadProfile()
@@ -87,7 +100,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
   }
 
-  return <AuthContext.Provider value={{ session, profile, loading, signIn, signOut }}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={{ session, profile, loading, profileLoading, signIn, signOut }}>{children}</AuthContext.Provider>
+  )
 }
 
 export function useAuth(): AuthContextValue {

@@ -17,7 +17,7 @@ import { Usuarios } from '@/pages/Usuarios'
 // sem ela, RLS bloqueia praticamente tudo. `Gate` decide entre spinner,
 // tela de login ou o app de verdade, conforme `AuthContext`.
 function Gate() {
-  const { session, loading } = useAuth()
+  const { session, loading, profile, profileLoading, signOut } = useAuth()
 
   if (loading) {
     return <div className="flex min-h-screen items-center justify-center bg-bg text-[13px] text-muted">Carregando…</div>
@@ -25,6 +25,33 @@ function Gate() {
 
   if (!session) {
     return <Login />
+  }
+
+  if (profileLoading) {
+    return <div className="flex min-h-screen items-center justify-center bg-bg text-[13px] text-muted">Carregando…</div>
+  }
+
+  // Sessão válida (e-mail/senha corretos), mas sem perfil cadastrado nesse
+  // app — essa instância de Auth é compartilhada com outros sistemas da
+  // OnChannel, então uma conta de outro app consegue autenticar aqui sem
+  // nunca ter sido de fato cadastrada no NF-FORNERIA-ADM. Sem essa checagem,
+  // a pessoa entrava e via um painel incompleto/vazio em vez de um aviso
+  // claro (achado real, 2026-10-16).
+  if (!profile) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-bg px-4 text-center">
+        <p className="max-w-[360px] text-[14px] font-semibold text-navy">
+          Seu login é válido, mas essa conta não tem acesso configurado neste painel. Fala com um administrador pra te cadastrar
+          aqui.
+        </p>
+        <button
+          onClick={() => signOut()}
+          className="rounded-[11px] border border-line bg-card px-4 py-[9px] text-[12.5px] font-bold text-navy"
+        >
+          Sair
+        </button>
+      </div>
+    )
   }
 
   return (
