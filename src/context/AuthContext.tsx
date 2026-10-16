@@ -60,8 +60,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.subscription.unsubscribe()
   }, [])
 
+  // Depende só do id do usuário, NÃO do objeto `session`: ao voltar pra aba o
+  // supabase-js renova o token e emite um objeto de sessão novo (mesmo
+  // usuário) — reagir a isso religava `profileLoading`, o Gate voltava pra
+  // "Carregando..." e desmontava a tela toda (perdia modal de edição aberto).
+  const userId = session?.user.id ?? null
   useEffect(() => {
-    if (!session) {
+    if (!userId) {
       setProfile(null)
       setProfileLoading(false)
       return
@@ -70,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileLoading(true)
     async function loadProfile() {
       try {
-        const { data, error } = await supabase.from('profiles').select('role, organization_id').eq('id', session!.user.id).single()
+        const { data, error } = await supabase.from('profiles').select('role, organization_id').eq('id', userId).single()
         if (cancelled) return
         if (error || !data) {
           setProfile(null)
@@ -89,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [session])
+  }, [userId])
 
   async function signIn(email: string, password: string) {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
