@@ -362,6 +362,7 @@ export function Faturamento() {
           ambiente: 'producao',
           ref: `${row.unitId}-${item.serviceType}-${competencia}`,
           mapping: emitterMapping[emitterKey(row.marca, item.serviceType as EligibleServiceType)] ?? EMPTY_MAPPING,
+          fallbackUrl: item.urlDanfse,
         })
         const label = SERVICE_LABEL[item.serviceType as EligibleServiceType] ?? item.serviceType
         zip.file(`${safe(row.unitName)} - ${safe(label)} - NFSe ${safe(item.nfseNumber ?? 'sem-numero')}.pdf`, pdf)

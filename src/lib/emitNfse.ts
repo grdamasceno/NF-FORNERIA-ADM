@@ -205,8 +205,8 @@ export async function cancelarNfseReal(params: ConsultarServicoParams & { justif
 
 // Baixa o PDF (DANFSe) de uma nota autorizada, via Edge Function (a Focus
 // não libera CORS pro navegador). Devolve os bytes do PDF.
-export async function baixarPdfNfse(params: ConsultarServicoParams): Promise<Uint8Array> {
-  const { ambiente, ref, mapping } = params
+export async function baixarPdfNfse(params: ConsultarServicoParams & { fallbackUrl?: string | null }): Promise<Uint8Array> {
+  const { ambiente, ref, mapping, fallbackUrl } = params
   if (!mapping.emitterId) throw new EmitirNfseError('Nenhum CNPJ emissor configurado para essa marca/serviço.')
   const { data: sessionData } = await supabase.auth.getSession()
   const accessToken = sessionData.session?.access_token
@@ -214,7 +214,7 @@ export async function baixarPdfNfse(params: ConsultarServicoParams): Promise<Uin
   const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/emit-nfse`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'baixar_pdf', emitterId: mapping.emitterId, ambiente, ref }),
+    body: JSON.stringify({ action: 'baixar_pdf', emitterId: mapping.emitterId, ambiente, ref, fallbackUrl: fallbackUrl ?? undefined }),
   })
   const body = (await resp.json().catch(() => null)) as { pdf_base64?: string; message?: string; error?: string } | null
   if (!resp.ok || !body?.pdf_base64) throw new EmitirNfseError(body?.message ?? body?.error ?? `Falha ao baixar PDF (HTTP ${resp.status}).`)

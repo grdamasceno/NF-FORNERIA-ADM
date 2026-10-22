@@ -37,6 +37,7 @@ type Ambiente = 'homologacao' | 'producao'
 
 interface EmitirBody {
   action?: 'emitir' | 'consultar' | 'cancelar' | 'baixar_pdf'
+  fallbackUrl?: string // só em 'baixar_pdf': URL do DANFSe já guardada (validada contra domínios da Focus)
   justificativa?: string // obrigatória em 'cancelar' (Focus exige 15+ caracteres)
   emitterId: string
   ambiente: Ambiente
@@ -182,9 +183,26 @@ Deno.serve(async (req: Request) => {
   // vem da própria resposta da Focus pra essa ref, nunca do cliente.)
   if (body.action === 'baixar_pdf') {
     const nota = await consultarNfse(baseUrl, authHeader, ref)
-    const pdfUrl: string | undefined = nota?.url_danfse
-    if (nota?.status !== 'autorizado' || !pdfUrl || !pdfUrl.startsWith('https://')) {
-      return jsonResponse({ error: 'pdf_indisponivel', message: 'Nota sem PDF disponível na Focus.', status: nota?.status ?? null }, 404)
+    let pdfUrl: string | undefined = nota?.url_danfse
+    // Se a consulta não trouxe a URL (ou a consulta falhou, ex: limite de
+    // requisições), usa a que o sistema já guardou — só se for https e de
+    // domínio da Focus/S3, pra função não virar proxy aberto.
+    if (!pdfUrl && body.fallbackUrl) {
+      try {
+        const u = new URL(body.fallbackUrl)
+        if (u.protocol === 'https:' && (u.hostname.endsWith('focusnfe.com.br') || u.hostname.endsWith('amazonaws.com'))) {
+          pdfUrl = body.fallbackUrl
+        }
+      } catch (_) { /* URL inválida: cai no erro abaixo */ }
+    }
+    if (!pdfUrl || !pdfUrl.startsWith('https://')) {
+      return jsonResponse(
+        {
+          error: 'pdf_indisponivel',
+          message: `Sem URL de PDF (status Focus: ${nota?.status ?? 'sem status'}${nota?.mensagem ? ' — ' + nota.mensagem : ''}).`,
+        },
+        404,
+      )
     }
     const pdfResp = await fetch(pdfUrl)
     if (!pdfResp.ok) {
