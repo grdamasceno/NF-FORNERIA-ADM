@@ -27,7 +27,7 @@ export function Franquias() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   async function handleDelete(u: LiveUnit) {
-    if (!confirm(`Excluir "${u.name}" (${u.marca})? Essa ação não pode ser desfeita.`)) return
+    if (!confirm(`Excluir "${u.name}" (${u.marca})? Faturas pendentes ou com nota cancelada dessa unidade também serão apagadas. Essa ação não pode ser desfeita.`)) return
     setDeletingId(u.id)
     setError(null)
     try {

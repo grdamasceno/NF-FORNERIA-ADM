@@ -161,7 +161,30 @@ export async function updateUnit(id: string, patch: UnitEditableFields): Promise
 // Sem cascade em `invoices.unit_id` (de propósito) — se a unidade já tiver
 // fatura/emissão vinculada, o banco recusa o delete em vez de apagar
 // histórico fiscal junto. O erro sobe pra quem chamou tratar.
+// Exclui a unidade junto com as faturas dela (invoices.unit_id não tem
+// cascade, então o banco recusava o delete). Só libera se NENHUMA nota
+// estiver autorizada: nota autorizada é registro fiscal real e apagar a
+// fatura a deixaria órfã. Faturas só pendentes/falhas/canceladas podem sair
+// (ex: unidade criada em duplicidade, cuja nota já foi cancelada).
 export async function deleteUnit(id: string): Promise<void> {
+  const { data: invoices, error: invErr } = await supabase.from('invoices').select('id').eq('unit_id', id)
+  if (invErr) throw new Error(invErr.message)
+  const invoiceIds = (invoices ?? []).map((i) => i.id as string)
+  if (invoiceIds.length > 0) {
+    const { count, error: itemErr } = await supabase
+      .from('invoice_items')
+      .select('id', { count: 'exact', head: true })
+      .in('invoice_id', invoiceIds)
+      .eq('nfse_status', 'autorizada')
+    if (itemErr) throw new Error(itemErr.message)
+    if ((count ?? 0) > 0) {
+      throw new Error(
+        'Essa unidade tem NFS-e autorizada — cancele a nota (Faturamento > Detalhes > Cancelar nota) antes de excluir a unidade.',
+      )
+    }
+    const { error: delInvErr } = await supabase.from('invoices').delete().in('id', invoiceIds)
+    if (delInvErr) throw new Error(delInvErr.message)
+  }
   const { error } = await supabase.from('units').delete().eq('id', id)
-  if (error) throw error
+  if (error) throw new Error(error.message)
 }
