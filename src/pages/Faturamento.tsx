@@ -7,7 +7,8 @@ import { brandFromTenantName, currentMonthValue, formatBRL, formatCompetencia, s
 import { simulateEmailSend, simulateWhatsappSend } from '@/lib/simulation'
 import { useSettings, type EligibleServiceType, type EmitterMappingEntry } from '@/context/SettingsContext'
 import { emitterKey } from '@/lib/liveEmitters'
-import { cancelarNfseReal, consultarNfseReal, emitirNfseReal } from '@/lib/emitNfse'
+import { cancelarNfseReal,
+  baixarPdfNfse, consultarNfseReal, emitirNfseReal } from '@/lib/emitNfse'
 import { fetchUnits } from '@/lib/liveUnits'
 import {
   deleteInvoices,
@@ -86,6 +87,7 @@ export function Faturamento() {
   const [importError, setImportError] = useState<string | null>(null)
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
   const batchStopRef = useRef(false)
+  const [pdfProgress, setPdfProgress] = useState<{ done: number; total: number } | null>(null)
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [competencia, setCompetencia] = useState(currentMonthValue())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -332,6 +334,57 @@ export function Faturamento() {
     setBatch(null)
   }
 
+  // Baixa os PDFs (DANFSe) das notas autorizadas num único .zip — das
+  // faturas selecionadas, ou de todas as listadas se nada estiver marcado.
+  // Um por vez (cada PDF consulta a Focus, que limita requisições/minuto).
+  async function downloadPdfs() {
+    if (pdfProgress) return
+    const scope = selectedIds.size > 0 ? invoiceRows.filter((r) => selectedIds.has(r.id)) : invoiceRows
+    const jobs = scope.flatMap((row) =>
+      row.items
+        .filter((i) => i.nfseStatus === 'autorizada')
+        .map((item) => ({ row, item })),
+    )
+    if (jobs.length === 0) {
+      setImportError('Nenhuma nota autorizada nas faturas selecionadas.')
+      return
+    }
+    setImportError(null)
+    const { default: JSZip } = await import('jszip')
+    const zip = new JSZip()
+    const failures: string[] = []
+    const safe = (t: string) => t.replace(/[\/:*?"<>|]/g, '').trim()
+    for (const [index, { row, item }] of jobs.entries()) {
+      setPdfProgress({ done: index, total: jobs.length })
+      if (index > 0) await sleep(1000)
+      try {
+        const pdf = await baixarPdfNfse({
+          ambiente: 'producao',
+          ref: `${row.unitId}-${item.serviceType}-${competencia}`,
+          mapping: emitterMapping[emitterKey(row.marca, item.serviceType as EligibleServiceType)] ?? EMPTY_MAPPING,
+        })
+        const label = SERVICE_LABEL[item.serviceType as EligibleServiceType] ?? item.serviceType
+        zip.file(`${safe(row.unitName)} - ${safe(label)} - NFSe ${safe(item.nfseNumber ?? 'sem-numero')}.pdf`, pdf)
+      } catch (e) {
+        failures.push(`${row.unitName} (${item.serviceType}): ${e instanceof Error ? e.message : 'falha'}`)
+      }
+    }
+    setPdfProgress(null)
+    const saved = jobs.length - failures.length
+    if (saved > 0) {
+      const blob = await zip.generateAsync({ type: 'blob' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `NFSe-${competencia}.zip`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    }
+    if (failures.length > 0) {
+      setImportError(`${saved} PDF(s) baixado(s); ${failures.length} falharam — ${failures.slice(0, 3).join(' · ')}${failures.length > 3 ? '…' : ''}`)
+    }
+  }
+
   // Só consulta (não reenvia) — pra resincronizar um item que já foi
   // autorizado de verdade na Focus mas o registro local ficou incompleto
   // (ex: número/URL do DANFSe faltando porque foi corrigido via SQL direto).
@@ -563,6 +616,18 @@ export function Faturamento() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={downloadPdfs}
+              disabled={!!pdfProgress}
+              title={selectedIds.size > 0 ? 'Baixa os PDFs das notas das faturas selecionadas (.zip)' : 'Baixa os PDFs de todas as notas autorizadas da lista (.zip)'}
+              className="whitespace-nowrap rounded-[9px] border border-line bg-white px-[12px] py-[7px] text-[11.5px] font-bold text-navy disabled:opacity-60"
+            >
+              {pdfProgress
+                ? `Baixando PDFs ${Math.min(pdfProgress.done + 1, pdfProgress.total)}/${pdfProgress.total}…`
+                : selectedIds.size > 0
+                  ? `Baixar PDFs (${selectedIds.size})`
+                  : 'Baixar todos os PDFs'}
+            </button>
             {selectedIds.size > 0 && (
               <button
                 onClick={deleteSelected}

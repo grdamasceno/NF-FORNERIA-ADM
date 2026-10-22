@@ -36,7 +36,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 type Ambiente = 'homologacao' | 'producao'
 
 interface EmitirBody {
-  action?: 'emitir' | 'consultar' | 'cancelar'
+  action?: 'emitir' | 'consultar' | 'cancelar' | 'baixar_pdf'
   justificativa?: string // obrigatória em 'cancelar' (Focus exige 15+ caracteres)
   emitterId: string
   ambiente: Ambiente
@@ -175,6 +175,25 @@ Deno.serve(async (req: Request) => {
   if (body.action === 'consultar') {
     const result = await consultarNfse(baseUrl, authHeader, ref)
     return jsonResponse(result)
+  }
+
+  // ---- modo "baixar_pdf": busca o DANFSe no servidor e devolve em base64 ----
+  // (o navegador não consegue baixar o PDF direto da Focus por CORS; a URL
+  // vem da própria resposta da Focus pra essa ref, nunca do cliente.)
+  if (body.action === 'baixar_pdf') {
+    const nota = await consultarNfse(baseUrl, authHeader, ref)
+    const pdfUrl: string | undefined = nota?.url_danfse
+    if (nota?.status !== 'autorizado' || !pdfUrl || !pdfUrl.startsWith('https://')) {
+      return jsonResponse({ error: 'pdf_indisponivel', message: 'Nota sem PDF disponível na Focus.', status: nota?.status ?? null }, 404)
+    }
+    const pdfResp = await fetch(pdfUrl)
+    if (!pdfResp.ok) {
+      return jsonResponse({ error: 'pdf_fetch_failed', message: `Falha ao baixar o PDF (HTTP ${pdfResp.status}).` }, 502)
+    }
+    const bytes = new Uint8Array(await pdfResp.arrayBuffer())
+    let binary = ''
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+    return jsonResponse({ numero: nota.numero ?? null, pdf_base64: btoa(binary) })
   }
 
   // ---- modo "cancelar": cancela NFS-e já autorizada (DELETE na Focus) ----

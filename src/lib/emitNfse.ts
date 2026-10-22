@@ -203,6 +203,27 @@ export async function cancelarNfseReal(params: ConsultarServicoParams & { justif
   }
 }
 
+// Baixa o PDF (DANFSe) de uma nota autorizada, via Edge Function (a Focus
+// não libera CORS pro navegador). Devolve os bytes do PDF.
+export async function baixarPdfNfse(params: ConsultarServicoParams): Promise<Uint8Array> {
+  const { ambiente, ref, mapping } = params
+  if (!mapping.emitterId) throw new EmitirNfseError('Nenhum CNPJ emissor configurado para essa marca/serviço.')
+  const { data: sessionData } = await supabase.auth.getSession()
+  const accessToken = sessionData.session?.access_token
+  if (!accessToken) throw new EmitirNfseError('Sessão expirada — faça login de novo.')
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/emit-nfse`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'baixar_pdf', emitterId: mapping.emitterId, ambiente, ref }),
+  })
+  const body = (await resp.json().catch(() => null)) as { pdf_base64?: string; message?: string; error?: string } | null
+  if (!resp.ok || !body?.pdf_base64) throw new EmitirNfseError(body?.message ?? body?.error ?? `Falha ao baixar PDF (HTTP ${resp.status}).`)
+  const binary = atob(body.pdf_base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
 export interface ConsultarServicoParams {
   ambiente: 'homologacao' | 'producao'
   ref: string
