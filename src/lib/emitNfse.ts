@@ -63,6 +63,22 @@ async function callEmitFunction(accessToken: string, payload: Record<string, unk
   return { resp, body }
 }
 
+// Consulta tolerante a limite de requisições da Focus (HTTP 429 / mensagem
+// "máximo de requisições"): espera e tenta de novo algumas vezes.
+async function consultarComRetry(
+  accessToken: string,
+  emitterId: string,
+  ambiente: 'homologacao' | 'producao',
+  ref: string,
+): Promise<FunctionBody | null> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { resp, body } = await callEmitFunction(accessToken, { action: 'consultar', emitterId, ambiente, ref })
+    if (resp.ok && body?.status) return body
+    await sleep(5000)
+  }
+  return null
+}
+
 export async function emitirNfseReal(params: EmitirServicoParams): Promise<EmitirNfseResult> {
   const { ambiente, ref, mapping, unit, valor, discriminacao } = params
   if (!mapping.emitterId) {
@@ -78,6 +94,13 @@ export async function emitirNfseReal(params: EmitirServicoParams): Promise<Emiti
   const { data: sessionData } = await supabase.auth.getSession()
   const accessToken = sessionData.session?.access_token
   if (!accessToken) throw new EmitirNfseError('Sessão expirada — faça login de novo.')
+
+  // Antes de enviar, confere se essa ref já tem nota autorizada na Focus
+  // (emissão anterior que passou mas ficou registrada como falha por limite
+  // de requisições, por ex). Se tiver, reaproveita a nota em vez de reenviar
+  // — é isso que impede nota duplicada e traz número/PDF de volta.
+  const jaEmitida = await callEmitFunction(accessToken, { action: 'consultar', emitterId: mapping.emitterId, ambiente, ref })
+  if (jaEmitida.resp.ok && jaEmitida.body?.status === 'autorizado') return jaEmitida.body
 
   const { resp, body } = await callEmitFunction(accessToken, {
     action: 'emitir',
@@ -107,8 +130,16 @@ export async function emitirNfseReal(params: EmitirServicoParams): Promise<Emiti
   })
 
   if (!resp.ok) {
-    const msg = body?.body?.mensagem ?? body?.message ?? body?.error ?? `Falha ao emitir NFS-e (HTTP ${resp.status}).`
-    throw new EmitirNfseError(String(msg))
+    const msg = String(body?.body?.mensagem ?? body?.message ?? body?.error ?? `Falha ao emitir NFS-e (HTTP ${resp.status}).`)
+    // "Já autorizada": a Focus recusa o reenvio porque essa ref JÁ tem nota
+    // autorizada (ex: a emissão anterior passou, mas a resposta se perdeu por
+    // limite de requisições). Não é falha — busca a nota existente e devolve
+    // como sucesso, sem emitir de novo.
+    if (/j[aá] autorizad/i.test(msg)) {
+      const existente = await consultarComRetry(accessToken, mapping.emitterId, ambiente, ref)
+      if (existente?.status === 'autorizado') return existente
+    }
+    throw new EmitirNfseError(msg)
   }
 
   // A Edge Function já espera ~10s pela autorização antes de devolver. Se
@@ -116,20 +147,27 @@ export async function emitirNfseReal(params: EmitirServicoParams): Promise<Emiti
   // em produção), continua consultando aqui em vez de desistir — nunca
   // marcar como sucesso sem o status literal "autorizado" (ver histórico:
   // isso já gravou nota como emitida sem ter sido autorizada de verdade).
+  // Consulta que falha (ex: limite de requisições da Focus) não derruba a
+  // emissão: mantém o último status conhecido e tenta de novo.
   let final: FunctionBody | null = body
   for (let attempt = 0; attempt < 6 && final?.status === 'processando_autorizacao'; attempt++) {
     await sleep(3000)
-    const { body: consultaBody } = await callEmitFunction(accessToken, {
+    const { resp: consultaResp, body: consultaBody } = await callEmitFunction(accessToken, {
       action: 'consultar',
       emitterId: mapping.emitterId,
       ambiente,
       ref,
     })
-    final = consultaBody
+    if (consultaResp.ok && consultaBody?.status) final = consultaBody
   }
 
   if (final?.status !== 'autorizado') {
-    throw new EmitirNfseError(describeFocusError(final))
+    const msg = describeFocusError(final)
+    if (/j[aá] autorizad/i.test(msg)) {
+      const existente = await consultarComRetry(accessToken, mapping.emitterId, ambiente, ref)
+      if (existente?.status === 'autorizado') return existente
+    }
+    throw new EmitirNfseError(msg)
   }
   return final
 }

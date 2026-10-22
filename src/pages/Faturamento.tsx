@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { UploadIcon } from '@/components/icons'
@@ -31,6 +31,8 @@ import type { LiveUnit } from '@/types'
 const MAX_BOLETO_BYTES = 3 * 1024 * 1024
 
 const EMPTY_MAPPING: EmitterMappingEntry = { emitterId: null, itemListaServico: null, codigoTributarioMunicipio: null, issRetido: false }
+const BATCH_GAP_MS = 10_000
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const SERVICE_TYPES: EligibleServiceType[] = ['call_center', 'royalties', 'marketing']
 
 const SERVICE_LABEL: Record<EligibleServiceType, string> = {
@@ -82,6 +84,8 @@ export function Faturamento() {
   // UnitMatchModal); só depois de resolvido mostra o preview de confirmação.
   const [importFlow, setImportFlow] = useState<{ fileName: string; sheets: ParsedSheet[]; matches?: UnitMatches } | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
+  const batchStopRef = useRef(false)
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [competencia, setCompetencia] = useState(currentMonthValue())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -259,7 +263,7 @@ export function Faturamento() {
   // tributação/discriminação; "juntar" Royalties + Call Center numa nota só
   // produziria uma nota fiscalmente errada (decisão tomada com o usuário).
   // Cada resultado é gravado direto em `invoice_items` (não só em memória).
-  async function emitRow(row: LiveInvoiceRow) {
+  async function emitRow(row: LiveInvoiceRow, gapMs = 0) {
     if (rowBusy[row.id]) return
     const eligible = eligibleServices(row)
     if (eligible.length === 0) return
@@ -268,8 +272,11 @@ export function Faturamento() {
 
     setRowBusy((prev) => ({ ...prev, [row.id]: true }))
 
-    await Promise.allSettled(
-      eligible.map(async (s) => {
+    // Um serviço por vez (não em paralelo): a Focus limita requisições por
+    // minuto, e em lote o intervalo `gapMs` espaça cada nota emitida.
+    for (const [index, s] of eligible.entries()) {
+      if (index > 0 && gapMs > 0) await sleep(gapMs)
+      {
         const itemId = s.item!.id
         try {
           const result = await emitirNfseReal({
@@ -290,8 +297,8 @@ export function Faturamento() {
           const msg = err instanceof Error ? err.message : 'Falha desconhecida ao emitir.'
           await recordEmissionResult(itemId, { nfseStatus: 'falha', errorMessage: msg })
         }
-      }),
-    )
+      }
+    }
 
     const refreshed = await fetchInvoiceRows(competencia)
     const updatedRow = refreshed.find((r) => r.id === row.id)
@@ -307,9 +314,22 @@ export function Faturamento() {
     })
   }
 
+  // Emissão em massa: uma nota por vez, com ${BATCH_GAP_MS / 1000}s entre cada uma, pra não
+  // estourar o limite de requisições por minuto da Focus (100/min — achado
+  // real: emitir tudo de uma vez gerou dezenas de falhas). Pode ser parada.
   async function emitLote() {
+    if (batch) return
     const pending = invoiceRows.filter((r) => !isFullyEmitted(r) && emitDisabledReason(r) === null)
-    await Promise.all(pending.map((row) => emitRow(row)))
+    if (pending.length === 0) return
+    batchStopRef.current = false
+    for (const [index, row] of pending.entries()) {
+      if (batchStopRef.current) break
+      setBatch({ done: index, total: pending.length })
+      if (index > 0) await sleep(BATCH_GAP_MS)
+      if (batchStopRef.current) break
+      await emitRow(row, BATCH_GAP_MS)
+    }
+    setBatch(null)
   }
 
   // Só consulta (não reenvia) — pra resincronizar um item que já foi
@@ -481,12 +501,23 @@ export function Faturamento() {
             }}
           />
         </label>
+        {batch && (
+          <button
+            onClick={() => {
+              batchStopRef.current = true
+            }}
+            className="inline-flex items-center gap-2 rounded-[11px] border border-line bg-white px-[15px] py-[10px] text-[12.5px] font-bold text-navy"
+            title="Para depois da nota em andamento; as demais continuam pendentes"
+          >
+            Parar
+          </button>
+        )}
         <button
           onClick={emitLote}
-          disabled={pendingCount === 0}
+          disabled={pendingCount === 0 || !!batch}
           className="inline-flex items-center gap-2 rounded-[11px] bg-orange px-[15px] py-[10px] text-[12.5px] font-bold text-white shadow-[0_6px_14px_rgba(233,78,27,.28)] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Emitir lote {pendingCount > 0 && `(${pendingCount})`}
+          {batch ? `Emitindo ${Math.min(batch.done + 1, batch.total)} de ${batch.total}…` : `Emitir lote ${pendingCount > 0 ? `(${pendingCount})` : ''}`}
         </button>
       </PageHeader>
 
