@@ -533,9 +533,19 @@ export function Faturamento() {
   return (
     <>
       <PageHeader title="Faturamento" subtitle="Importar planilha, preencher manualmente, emitir nota (real, Focus NFe), cobrar e enviar">
-        <div className="flex items-center gap-2 rounded-[11px] border border-line bg-card px-[13px] py-[9px] text-[12.5px] font-semibold text-navy">
-          Competência: {formatCompetencia(competencia)}
-        </div>
+        <label className="flex items-center gap-2 rounded-[11px] border border-line bg-card px-[13px] py-[6px] text-[12.5px] font-semibold text-navy">
+          Competência:
+          <input
+            type="month"
+            value={competencia}
+            onChange={(e) => {
+              if (!e.target.value) return
+              setSelectedIds(new Set())
+              setCompetencia(e.target.value)
+            }}
+            className="cursor-pointer rounded-[7px] border border-line bg-white px-[6px] py-[3px] text-[12.5px] font-semibold text-navy outline-none"
+          />
+        </label>
         <button
           onClick={() => navigate('/faturamento/preencher')}
           className="inline-flex items-center gap-2 rounded-[11px] border border-line bg-card px-[15px] py-[10px] text-[12.5px] font-bold text-navy"
