@@ -8,7 +8,7 @@ import type { ImportWarning, ParsedSpreadsheetRow } from '@/types'
 const HEADER_ALIASES = {
   unitName: ['nome da loja', 'loja', 'unidade', 'franquia'],
   cnpj: ['cnpj'],
-  callCenter: ['call center'],
+  callCenter: ['call center', 'callcenter'],
   royalties: ['royalts', 'royalties'],
   marketing: ['marketing'],
 } as const
@@ -21,7 +21,8 @@ function normalizeHeader(h: unknown): string {
 
 function toNumber(cell: unknown): number {
   if (cell === null || cell === undefined || cell === '') return 0
-  const n = typeof cell === 'number' ? cell : Number(String(cell).replace(/\./g, '').replace(',', '.'))
+  // Aceita texto formatado ("R$ 3.801,19"): tira tudo que não é dígito/separador.
+  const n = typeof cell === 'number' ? cell : Number(String(cell).replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.'))
   return Number.isFinite(n) ? n : 0
 }
 
@@ -50,16 +51,27 @@ export function parseSpreadsheet(file: ArrayBuffer): ParsedSheet[] {
 // linha 0 já é o cabeçalho. Procura, nas primeiras linhas, a que tem pelo
 // menos um dos nomes de coluna conhecidos.
 function findHeaderRowIndex(raw: unknown[][]): number {
-  const knownAliases = [...HEADER_ALIASES.callCenter, ...HEADER_ALIASES.royalties, ...HEADER_ALIASES.marketing, ...HEADER_ALIASES.unitName]
-  for (let i = 0; i < Math.min(raw.length, 5); i++) {
+  const groups = Object.values(HEADER_ALIASES) as ReadonlyArray<readonly string[]>
+  let best = 0
+  let bestScore = 0
+  for (let i = 0; i < Math.min(raw.length, 8); i++) {
     // `Array.from` em vez de `.map` de propósito: linhas de planilha vêm
     // como sparse arrays (buracos nas células vazias), e `.findIndex` visita
     // buracos diferente de `.map`/`.some` — `Array.from` densifica antes de
     // qualquer comparação, evitando erro ao chamar `.includes` num `undefined`.
-    const headers = Array.from(raw[i], normalizeHeader)
-    if (headers.some((h) => knownAliases.some((a) => h.includes(a)))) return i
+    // Células longas (>30 caracteres) são títulos ("ROYALTIES CALLCENTER -
+    // EMISSÃO DE NOTAS"), não cabeçalho de coluna — ignoradas, senão a linha
+    // de título parecia ser o cabeçalho (achado real, planilha de emissão).
+    const headers = Array.from(raw[i], normalizeHeader).filter((h) => h.length > 0 && h.length <= 30)
+    // Pontua pela quantidade de colunas conhecidas DISTINTAS achadas na
+    // linha; a de maior pontuação é o cabeçalho.
+    const score = groups.filter((aliases) => headers.some((h) => aliases.some((a) => h.includes(a)))).length
+    if (score > bestScore) {
+      best = i
+      bestScore = score
+    }
   }
-  return 0
+  return best
 }
 
 function parseSheet(sheetName: string, sheet: XLSX.WorkSheet): ParsedSheet {
