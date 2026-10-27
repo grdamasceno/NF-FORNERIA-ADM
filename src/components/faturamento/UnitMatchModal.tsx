@@ -24,6 +24,8 @@ interface MatchCandidate {
   marca: LiveUnit['marca']
   values: { callCenter: number; royalties: number; marketing: number; total: number }
   autoMatchedId: string | null
+  matchedBy: 'cnpj' | 'nome' | null
+  cnpj: string | null
 }
 
 function cleanRowName(rowName: string): string {
@@ -35,7 +37,7 @@ function cleanRowName(rowName: string): string {
 // planilha com "Barra da Tijuca" batendo unidade cadastrada "Barra Tijuca").
 // Ambíguo (mais de uma candidata por "contains") não autocompleta sozinho —
 // fica pro usuário escolher, conforme pedido.
-function autoMatch(rowName: string, candidates: LiveUnit[]): LiveUnit | null {
+function matchByName(rowName: string, candidates: LiveUnit[]): LiveUnit | null {
   const target = slugify(cleanRowName(rowName))
   if (!target) return null
   const exact = candidates.find((u) => slugify(u.name) === target)
@@ -47,6 +49,32 @@ function autoMatch(rowName: string, candidates: LiveUnit[]): LiveUnit | null {
   return partial.length === 1 ? partial[0] : null
 }
 
+const onlyDigits = (v: string) => v.replace(/D/g, '')
+
+// CNPJ é a chave principal (não depende de como o nome foi escrito). Duas
+// verificações, nessa ordem: (1) texto idêntico, com a formatação (pontos,
+// barra, traço); (2) só os 14 dígitos — cobre planilha sem máscara ou com
+// formatação diferente. CNPJ que veio como número perde o zero à esquerda,
+// então 12–13 dígitos são completados. Se o mesmo CNPJ aparece em mais de
+// uma unidade (franqueado com várias lojas), desempata pelo nome; se ainda
+// ficar ambíguo, não autocompleta. Sem CNPJ na planilha/cadastro: só pelo nome.
+function autoMatch(rowName: string, rowCnpj: string | null, candidates: LiveUnit[]): { unit: LiveUnit; by: 'cnpj' | 'nome' } | null {
+  if (rowCnpj) {
+    const formatted = rowCnpj.trim()
+    let digits = onlyDigits(rowCnpj)
+    if (digits.length === 12 || digits.length === 13) digits = digits.padStart(14, '0')
+    let hits = candidates.filter((u) => u.cnpj && u.cnpj.trim() === formatted)
+    if (hits.length === 0 && digits.length === 14) hits = candidates.filter((u) => u.cnpj && onlyDigits(u.cnpj) === digits)
+    if (hits.length === 1) return { unit: hits[0], by: 'cnpj' }
+    if (hits.length > 1) {
+      const byName = matchByName(rowName, hits)
+      return byName ? { unit: byName, by: 'cnpj' } : null
+    }
+  }
+  const byName = matchByName(rowName, candidates)
+  return byName ? { unit: byName, by: 'nome' } : null
+}
+
 function buildCandidates(sheets: ParsedSheet[], units: LiveUnit[]): MatchCandidate[] {
   return sheets.flatMap((sheet, sheetIdx) => {
     const marca = brandFromTenantName(sheet.tenantName)
@@ -54,15 +82,20 @@ function buildCandidates(sheets: ParsedSheet[], units: LiveUnit[]): MatchCandida
     return sheet.rows
       .map((r, rowIdx) => ({ r, rowIdx }))
       .filter(({ r }) => !r.hasNoCharge)
-      .map(({ r, rowIdx }) => ({
+      .map(({ r, rowIdx }) => {
+        const match = autoMatch(r.unitName, r.cnpj, brandUnits)
+        return {
         sheetIdx,
         rowIdx,
         key: rowMatchKey(sheetIdx, rowIdx),
         rowName: r.unitName,
         marca,
         values: { callCenter: r.callCenterValue, royalties: r.royaltiesValue, marketing: r.marketingValue, total: r.totalValue },
-        autoMatchedId: autoMatch(r.unitName, brandUnits)?.id ?? null,
-      }))
+        autoMatchedId: match?.unit.id ?? null,
+        matchedBy: match?.by ?? null,
+        cnpj: r.cnpj,
+      }
+      })
   })
 }
 
@@ -120,7 +153,7 @@ const NO_MATCH = '__none__'
         <p className="mt-1 text-[12.5px] text-muted">{fileName}</p>
         <p className="mt-2 text-[12px] text-faint">
           {autoMatchedCount} de {candidates.length} unidade{candidates.length === 1 ? '' : 's'} correspondida{candidates.length === 1 ? '' : 's'}{' '}
-          automaticamente pelo nome. {unresolvedCount > 0 ? `${unresolvedCount} precisa${unresolvedCount === 1 ? '' : 'm'} de correlação manual.` : 'Tudo certo.'}
+          automaticamente (CNPJ primeiro, depois nome). {unresolvedCount > 0 ? `${unresolvedCount} precisa${unresolvedCount === 1 ? '' : 'm'} de correlação manual.` : 'Tudo certo.'}
         </p>
 
         {[...byMarca.entries()].map(([marca, rows]) => (
@@ -146,7 +179,13 @@ const NO_MATCH = '__none__'
                     const noMatch = choices[c.key] === null
                     return (
                       <tr key={c.key} className={`border-t border-line ${unresolved ? 'bg-red-soft' : noMatch ? 'bg-amber-soft' : ''}`}>
-                        <td className="px-3 py-[7px] text-[12px] font-semibold text-navy">{c.rowName}</td>
+                        <td className="px-3 py-[7px] text-[12px] font-semibold text-navy">
+                          {c.rowName}
+                          <div className="text-[10px] font-medium text-faint">
+                            {c.cnpj ?? 'sem CNPJ na planilha'}
+                            {c.matchedBy && choices[c.key] === c.autoMatchedId ? ' · casou por ' + (c.matchedBy === 'cnpj' ? 'CNPJ' : 'nome') : ''}
+                          </div>
+                        </td>
                         <td className="px-3 py-[7px] text-right text-[11.5px] text-muted">
                           {c.values.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </td>

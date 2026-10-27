@@ -7,6 +7,7 @@ import type { ImportWarning, ParsedSpreadsheetRow } from '@/types'
 
 const HEADER_ALIASES = {
   unitName: ['nome da loja', 'loja', 'unidade', 'franquia'],
+  cnpj: ['cnpj'],
   callCenter: ['call center'],
   royalties: ['royalts', 'royalties'],
   marketing: ['marketing'],
@@ -82,6 +83,7 @@ function parseSheet(sheetName: string, sheet: XLSX.WorkSheet): ParsedSheet {
   // Duck", que não é a coluna 0), usa a que encontrou.
   const foundUnitNameCol = findCol(HEADER_ALIASES.unitName)
   const colUnitName = foundUnitNameCol === -1 ? 0 : foundUnitNameCol
+  const colCnpj = findCol(HEADER_ALIASES.cnpj)
   const colCallCenter = findCol(HEADER_ALIASES.callCenter)
   const colRoyalties = findCol(HEADER_ALIASES.royalties)
   const colMarketing = findCol(HEADER_ALIASES.marketing)
@@ -117,8 +119,11 @@ function parseSheet(sheetName: string, sheet: XLSX.WorkSheet): ParsedSheet {
       warnings.push({ rowIndex, unitName: rawUnitName, message: 'Valor negativo encontrado na linha.' })
     }
 
+    const rawCnpj = colCnpj === -1 ? '' : String(row[colCnpj] ?? '').trim()
+
     rows.push({
       unitName: toTitleCase(rawUnitName),
+      cnpj: rawCnpj || null,
       callCenterValue,
       royaltiesValue,
       marketingValue,

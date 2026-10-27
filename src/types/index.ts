@@ -134,6 +134,9 @@ export interface InvoiceItem {
 // Linha crua extraída da planilha antes de virar Invoice (seção 3 do MD).
 export interface ParsedSpreadsheetRow {
   unitName: string
+  // CNPJ como veio na planilha (com ou sem formatação) — chave principal pra
+  // correlacionar com a unidade cadastrada; null se a aba não tem a coluna.
+  cnpj: string | null
   callCenterValue: number
   royaltiesValue: number
   marketingValue: number
