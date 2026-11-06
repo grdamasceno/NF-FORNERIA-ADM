@@ -87,7 +87,22 @@ function parseSheet(sheetName: string, sheet: XLSX.WorkSheet): ParsedSheet {
   const dataRows = raw.slice(headerRowIndex + 1)
   const headers = Array.from(headerRow, normalizeHeader) // ver comentário em findHeaderRowIndex
 
-  const findCol = (aliases: readonly string[]) => headers.findIndex((h) => aliases.some((a) => h.includes(a)))
+  // Colunas de desconto ("DESCONTO ERRO CALLCENTER") também citam o nome do
+  // serviço — por isso ficam fora da busca das colunas de valor, senão o
+  // desconto podia ser lido como o próprio valor do serviço.
+  const findCol = (aliases: readonly string[]) =>
+    headers.findIndex((h) => !h.includes('desconto') && aliases.some((a) => h.includes(a)))
+  // Desconto é ABATIDO do serviço que o cabeçalho cita (royalties/marketing;
+  // sem menção explícita, call center). A planilha de emissão já traz o
+  // desconto em coluna própria e o "Total boleto" líquido — a nota deve sair
+  // pelo valor líquido, igual ao boleto.
+  const discountCols = headers
+    .map((h, idx) => ({ h, idx }))
+    .filter(({ h }) => h.includes('desconto'))
+    .map(({ h, idx }) => ({
+      idx,
+      service: /royalt/.test(h) ? ('royalties' as const) : /marketing/.test(h) ? ('marketing' as const) : ('callCenter' as const),
+    }))
 
   // Nem toda aba rotula a coluna do nome da unidade (a planilha "Forneria"
   // deixa essa coluna sem cabeçalho) — quando não acha por nome, cai pra
@@ -122,9 +137,19 @@ function parseSheet(sheetName: string, sheet: XLSX.WorkSheet): ParsedSheet {
       return
     }
 
-    const callCenterValue = toNumber(row[colCallCenter])
-    const royaltiesValue = toNumber(row[colRoyalties])
-    const marketingValue = toNumber(row[colMarketing])
+    const gross = {
+      callCenter: toNumber(row[colCallCenter]),
+      royalties: toNumber(row[colRoyalties]),
+      marketing: toNumber(row[colMarketing]),
+    }
+    for (const { idx, service } of discountCols) {
+      const discount = Math.abs(toNumber(row[idx]))
+      if (discount > gross[service]) {
+        warnings.push({ rowIndex, unitName: rawUnitName, message: 'Desconto maior que o valor do serviço — valor zerado.' })
+      }
+      gross[service] = Math.max(0, gross[service] - discount)
+    }
+    const { callCenter: callCenterValue, royalties: royaltiesValue, marketing: marketingValue } = gross
     const totalValue = callCenterValue + royaltiesValue + marketingValue
 
     if ([callCenterValue, royaltiesValue, marketingValue].some((v) => v < 0)) {
