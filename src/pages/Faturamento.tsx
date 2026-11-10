@@ -22,6 +22,7 @@ import {
   updateInvoicePayment,
   updateInvoiceStatus,
   updateItemObservacao,
+  fetchItemForEmission,
   type LiveInvoiceRow,
 } from '@/lib/liveInvoices'
 import { parseSpreadsheet, type ParsedSheet } from '@/lib/spreadsheetParser'
@@ -253,6 +254,13 @@ export function Faturamento() {
     })).filter((s) => s.item && s.item.nfseStatus !== 'autorizada' && s.item.nfseStatus !== 'cancelada' && serviceEligibility[s.serviceType] && emitterFor(row.marca, s.serviceType))
   }
 
+  // A ref da Focus é única por nota; depois de um cancelamento a mesma ref não
+  // pode ser reusada, então cada reemissão ganha o sufixo -r{n}.
+  function itemRef(row: LiveInvoiceRow, serviceType: EligibleServiceType): string {
+    const seq = row.items.find((i) => i.serviceType === serviceType)?.emissionSeq ?? 1
+    return `${row.unitId}-${serviceType}-${competencia}${seq > 1 ? `-r${seq}` : ''}`
+  }
+
   function emitDisabledReason(row: LiveInvoiceRow): string | null {
     const unit = unitsById[row.unitId]
     if (!unit) return 'Unidade não encontrada no cadastro (Franquias) — não é possível emitir.'
@@ -282,17 +290,23 @@ export function Faturamento() {
       {
         const itemId = s.item!.id
         try {
+          // Valor e observação sempre lidos do banco NA HORA de emitir — o
+          // estado da tela pode estar velho (planilha reimportada/aba antiga)
+          // e a nota sairia com valor errado (achado real: Vargem Pequena).
+          const fresh = await fetchItemForEmission(itemId)
+          if (fresh.nfseStatus === 'autorizada') continue
           const result = await emitirNfseReal({
             ambiente: 'producao',
-            ref: `${row.unitId}-${s.serviceType}-${competencia}`,
+            ref: itemRef(row, s.serviceType as EligibleServiceType),
             mapping: emitterMapping[emitterKey(row.marca, s.serviceType)] ?? EMPTY_MAPPING,
             unit,
-            valor: s.item!.value,
+            valor: fresh.value,
             discriminacao:
               `${s.label} — ${row.unitName} — ${formatCompetencia(competencia)}` +
-              (s.item!.observacao ? `\n${s.item!.observacao}` : ''),
+              (fresh.observacao ? `\n${fresh.observacao}` : ''),
           })
           await recordEmissionResult(itemId, {
+            emittedValue: fresh.value,
             nfseStatus: 'autorizada',
             nfseNumber: result.numero ?? null,
             urlDanfse: result.url_danfse ?? null,
@@ -363,7 +377,7 @@ export function Faturamento() {
       try {
         const pdf = await baixarPdfNfse({
           ambiente: 'producao',
-          ref: `${row.unitId}-${item.serviceType}-${competencia}`,
+          ref: itemRef(row, item.serviceType as EligibleServiceType),
           mapping: emitterMapping[emitterKey(row.marca, item.serviceType as EligibleServiceType)] ?? EMPTY_MAPPING,
           fallbackUrl: item.urlDanfse,
         })
@@ -399,7 +413,7 @@ export function Faturamento() {
     try {
       const result = await consultarNfseReal({
         ambiente: 'producao',
-        ref: `${row.unitId}-${serviceType}-${competencia}`,
+        ref: itemRef(row, serviceType as EligibleServiceType),
         mapping: emitterMapping[emitterKey(row.marca, serviceType)] ?? EMPTY_MAPPING,
       })
       if (result.status === 'autorizado') {
@@ -441,7 +455,7 @@ export function Faturamento() {
     try {
       await cancelarNfseReal({
         ambiente: 'producao',
-        ref: `${row.unitId}-${serviceType}-${competencia}`,
+        ref: itemRef(row, serviceType as EligibleServiceType),
         mapping: emitterMapping[emitterKey(row.marca, serviceType)] ?? EMPTY_MAPPING,
         justificativa: justificativa.trim(),
       })
@@ -882,6 +896,14 @@ export function Faturamento() {
                                       >
                                         {syncingIds.has(it.id) ? 'Consultando…' : `Nota ${label}: buscar PDF`}
                                       </button>
+                                    )}
+                                    {!cancelled && it.emittedValue !== null && Math.abs(it.emittedValue - it.value) > 0.004 && (
+                                      <span
+                                        title="O valor atual do faturamento é diferente do valor com que a nota foi emitida. Cancele a nota e emita de novo."
+                                        className="text-[10.5px] font-bold text-red"
+                                      >
+                                        ⚠ nota {formatBRL(it.emittedValue)} ≠ atual {formatBRL(it.value)}
+                                      </span>
                                     )}
                                     {cancelled ? (
                                       <span className="text-[10.5px] font-bold text-red">Cancelada</span>

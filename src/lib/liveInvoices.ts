@@ -23,6 +23,10 @@ export interface LiveInvoiceItem {
   emitterId: string | null
   // Texto livre (ex: desconto) que entra na descrição da nota na emissão.
   observacao: string | null
+  // 1 = primeira emissão; sobe a cada cancelamento (ref nova na Focus).
+  emissionSeq: number
+  // Valor com que a nota autorizada foi realmente emitida.
+  emittedValue: number | null
 }
 
 export interface LiveInvoiceRow {
@@ -52,6 +56,8 @@ interface InvoiceItemRow {
   error_message: string | null
   emitter_id: string | null
   observacao: string | null
+  emission_seq: number
+  emitted_value: number | null
 }
 
 interface InvoiceRow {
@@ -81,6 +87,8 @@ function toLiveInvoiceRow(row: InvoiceRow): LiveInvoiceRow {
     errorMessage: it.error_message,
     emitterId: it.emitter_id,
     observacao: it.observacao,
+    emissionSeq: it.emission_seq ?? 1,
+    emittedValue: it.emitted_value === null || it.emitted_value === undefined ? null : Number(it.emitted_value),
   }))
   const byType = Object.fromEntries(items.map((i) => [i.serviceType, i])) as Partial<Record<EligibleServiceType, LiveInvoiceItem>>
   return {
@@ -218,7 +226,7 @@ export async function fetchInvoiceRows(competencia: string): Promise<LiveInvoice
   const { data, error } = await supabase
     .from('invoices')
     .select(
-      'id, unit_id, total_value, payment_status, boleto_file_name, whatsapp_sent, email_sent, status, units(name, tenants(name)), invoice_items(id, service_type, value, nfse_number, nfse_status, url_danfse, error_message, emitter_id, observacao)',
+      'id, unit_id, total_value, payment_status, boleto_file_name, whatsapp_sent, email_sent, status, units(name, tenants(name)), invoice_items(id, service_type, value, nfse_number, nfse_status, url_danfse, error_message, emitter_id, observacao, emission_seq, emitted_value)',
     )
     .in('billing_period_id', periodIds)
   if (error) throw error
@@ -233,11 +241,13 @@ export async function recordEmissionResult(
     urlDanfse?: string | null
     errorMessage?: string | null
     emitterId?: string | null
+    emittedValue?: number
   },
 ): Promise<void> {
   const { error } = await supabase
     .from('invoice_items')
     .update({
+      ...(result.emittedValue !== undefined ? { emitted_value: result.emittedValue } : {}),
       nfse_status: result.nfseStatus,
       nfse_number: result.nfseNumber ?? null,
       url_danfse: result.urlDanfse ?? null,
@@ -256,10 +266,32 @@ export async function updateItemObservacao(itemId: string, observacao: string): 
   if (error) throw error
 }
 
+export async function fetchItemForEmission(
+  itemId: string,
+): Promise<{ value: number; observacao: string | null; nfseStatus: LiveInvoiceItem['nfseStatus'] }> {
+  const { data, error } = await supabase.from('invoice_items').select('value, observacao, nfse_status').eq('id', itemId).single()
+  if (error) throw error
+  return { value: Number(data.value), observacao: data.observacao, nfseStatus: data.nfse_status }
+}
+
+// Após cancelar na Focus o item volta a "pendente" (pode ser reemitida, já com
+// o valor corrigido) e sobe a sequência — a ref antiga fica queimada na Focus.
+// O histórico do cancelamento fica em canceled_at/cancel_reason.
 export async function recordCancellation(itemId: string, reason: string): Promise<void> {
+  const { data, error: readError } = await supabase.from('invoice_items').select('emission_seq').eq('id', itemId).single()
+  if (readError) throw readError
   const { error } = await supabase
     .from('invoice_items')
-    .update({ nfse_status: 'cancelada', canceled_at: new Date().toISOString(), cancel_reason: reason })
+    .update({
+      nfse_status: 'pendente',
+      nfse_number: null,
+      url_danfse: null,
+      error_message: null,
+      emitted_value: null,
+      emission_seq: Number(data.emission_seq ?? 1) + 1,
+      canceled_at: new Date().toISOString(),
+      cancel_reason: reason,
+    })
     .eq('id', itemId)
   if (error) throw error
 }
