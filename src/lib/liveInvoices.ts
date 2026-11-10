@@ -21,6 +21,8 @@ export interface LiveInvoiceItem {
   urlDanfse: string | null
   errorMessage: string | null
   emitterId: string | null
+  // Texto livre (ex: desconto) que entra na descrição da nota na emissão.
+  observacao: string | null
 }
 
 export interface LiveInvoiceRow {
@@ -49,6 +51,7 @@ interface InvoiceItemRow {
   url_danfse: string | null
   error_message: string | null
   emitter_id: string | null
+  observacao: string | null
 }
 
 interface InvoiceRow {
@@ -77,6 +80,7 @@ function toLiveInvoiceRow(row: InvoiceRow): LiveInvoiceRow {
     urlDanfse: it.url_danfse,
     errorMessage: it.error_message,
     emitterId: it.emitter_id,
+    observacao: it.observacao,
   }))
   const byType = Object.fromEntries(items.map((i) => [i.serviceType, i])) as Partial<Record<EligibleServiceType, LiveInvoiceItem>>
   return {
@@ -214,7 +218,7 @@ export async function fetchInvoiceRows(competencia: string): Promise<LiveInvoice
   const { data, error } = await supabase
     .from('invoices')
     .select(
-      'id, unit_id, total_value, payment_status, boleto_file_name, whatsapp_sent, email_sent, status, units(name, tenants(name)), invoice_items(id, service_type, value, nfse_number, nfse_status, url_danfse, error_message, emitter_id)',
+      'id, unit_id, total_value, payment_status, boleto_file_name, whatsapp_sent, email_sent, status, units(name, tenants(name)), invoice_items(id, service_type, value, nfse_number, nfse_status, url_danfse, error_message, emitter_id, observacao)',
     )
     .in('billing_period_id', periodIds)
   if (error) throw error
@@ -240,6 +244,14 @@ export async function recordEmissionResult(
       error_message: result.errorMessage ?? null,
       emitter_id: result.emitterId ?? null,
     })
+    .eq('id', itemId)
+  if (error) throw error
+}
+
+export async function updateItemObservacao(itemId: string, observacao: string): Promise<void> {
+  const { error } = await supabase
+    .from('invoice_items')
+    .update({ observacao: observacao.trim() === '' ? null : observacao.trim() })
     .eq('id', itemId)
   if (error) throw error
 }

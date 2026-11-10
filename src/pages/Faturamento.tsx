@@ -21,6 +21,7 @@ import {
   updateInvoiceBoleto,
   updateInvoicePayment,
   updateInvoiceStatus,
+  updateItemObservacao,
   type LiveInvoiceRow,
 } from '@/lib/liveInvoices'
 import { parseSpreadsheet, type ParsedSheet } from '@/lib/spreadsheetParser'
@@ -287,7 +288,9 @@ export function Faturamento() {
             mapping: emitterMapping[emitterKey(row.marca, s.serviceType)] ?? EMPTY_MAPPING,
             unit,
             valor: s.item!.value,
-            discriminacao: `${s.label} — ${row.unitName} — ${formatCompetencia(competencia)}`,
+            discriminacao:
+              `${s.label} — ${row.unitName} — ${formatCompetencia(competencia)}` +
+              (s.item!.observacao ? `\n${s.item!.observacao}` : ''),
           })
           await recordEmissionResult(itemId, {
             nfseStatus: 'autorizada',
@@ -499,6 +502,16 @@ export function Faturamento() {
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (e) {
       setImportError(e instanceof Error ? e.message : 'Falha ao abrir o boleto.')
+    }
+  }
+
+  async function saveObservacao(item: { id: string; observacao: string | null }, value: string) {
+    if ((item.observacao ?? '') === value.trim()) return
+    try {
+      await updateItemObservacao(item.id, value)
+      await reloadRows()
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : 'Falha ao salvar a observação.')
     }
   }
 
@@ -888,6 +901,23 @@ export function Faturamento() {
                             {!hasAutorizada && !row.items.some((it) => it.nfseStatus === 'cancelada') && (
                               <span className="text-[10.5px] text-faint">Nenhuma nota emitida.</span>
                             )}
+                            {row.items
+                              .filter((it) => it.value > 0 && (it.nfseStatus === 'pendente' || it.nfseStatus === 'falha'))
+                              .map((it) => (
+                                <label key={`${it.id}-${it.observacao ?? ''}`} className="flex w-full flex-col gap-[3px]">
+                                  <span className="text-[10.5px] font-bold text-navy">
+                                    Observação na nota de {SERVICE_LABEL[it.serviceType]}
+                                  </span>
+                                  <textarea
+                                    defaultValue={it.observacao ?? ''}
+                                    rows={2}
+                                    maxLength={500}
+                                    placeholder="Ex: DESCONTO ERRO CALL CENTER - 31,84 (entra na descrição da nota)"
+                                    onBlur={(e) => saveObservacao(it, e.target.value)}
+                                    className="w-full rounded-[7px] border border-line bg-white px-[8px] py-[5px] text-[11px] text-navy"
+                                  />
+                                </label>
+                              ))}
                           </div>
                         )}
                       </div>
